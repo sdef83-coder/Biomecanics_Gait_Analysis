@@ -8,6 +8,7 @@ function [stats] = Spatiotempocalc(Left, Right)
 %   stats : structure contenant les statistiques par jambe + moyennes + médianes + indices de symétrie
 
     variableNames = {
+        'tempsFoulee', ...
         'vitCadencePasParMinute', ...
         'vitFoulee', ...
         'pctToeOffOppose', ...
@@ -17,7 +18,12 @@ function [stats] = Spatiotempocalc(Left, Right)
         'comRangeML', ...
         'NormStepLength', ...
         'NormCadence', ...
-        'NormWalkRatio'
+        'NormWalkRatio', ...
+        'LargeurPas', ...
+        'MoS_AP_Mean', ...
+        'MoS_ML_Mean', ...
+        'MoS_HS_AP', ...
+        'MoS_HS_ML'
     };
 
     for v = 1:length(variableNames)
@@ -62,41 +68,6 @@ function [stats] = Spatiotempocalc(Left, Right)
         R = stats.([varName '_Mean_Right']);
         stats.([varName '_SI']) = (abs(L - R) / (0.5 * (L + R))) * 100;
     end
-
-    % === Calcul Largeur de pas (cm)===
-    % Gauche
-    leftBase  = vertcat(Left.baseSustentation);
-    leftVar  = arrayfun(@(x) x.maxPostMoyenne / 10, leftBase);
-    % Droite
-    rightBase = vertcat(Right.baseSustentation);
-    rightVar = arrayfun(@(x) x.maxPostMoyenne / 10, rightBase);
-
-    prefix = 'LargeurPas';
-
-    % Moyennes
-    stats.([prefix '_Mean_Left']) = mean(leftVar, 'omitnan');
-    stats.([prefix '_Mean_Right']) = mean(rightVar, 'omitnan');
-    stats.([prefix '_Mean_Mean']) = mean([ ...
-        stats.([prefix '_Mean_Left']), ...
-        stats.([prefix '_Mean_Right'])], 'omitnan');
-
-    % Écarts-types
-    stats.([prefix '_SD_Left']) = std(leftVar, 'omitnan');
-    stats.([prefix '_SD_Right']) = std(rightVar, 'omitnan');
-
-    % Coefficients de variation (basés sur les moyennes)
-    stats.([prefix '_CV_Left']) = ...
-        (stats.([prefix '_SD_Left']) / stats.([prefix '_Mean_Left'])) * 100;
-    stats.([prefix '_CV_Right']) = ...
-        (stats.([prefix '_SD_Right']) / stats.([prefix '_Mean_Right'])) * 100;
-    stats.([prefix '_CV_Mean']) = mean([ ...
-        stats.([prefix '_CV_Left']), ...
-        stats.([prefix '_CV_Right'])], 'omitnan');
-
-    % Symmetry Index pour LargeurPas (basé sur les moyennes)
-    L = stats.([prefix '_Mean_Left']);
-    R = stats.([prefix '_Mean_Right']);
-    stats.([prefix '_SI']) = (abs(L - R) / (0.5 * (L + R))) * 100;
 
     % === Calcul du double appui pour chaque cycle ===
     % Gauche

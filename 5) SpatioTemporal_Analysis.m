@@ -19,13 +19,15 @@ end
 ParticipantGroup;
 Condition = {'Plat', 'Medium', 'High'};
 % === Dictionnaire de renommage des variables ===
-oldNames = {'pctSimpleAppuie','DoubleSupport','LargeurPas','vitFoulee','distFoulee',...
-            'NormWalkRatio','vitCadencePasParMinute','NormStepLength','NormCadence'};
+oldNames = {'pctSimpleAppuie', 'DoubleSupport','LargeurPas','vitFoulee','distFoulee', 'tempsFoulee', ...
+            'NormWalkRatio','vitCadencePasParMinute','NormStepLength','NormCadence', ...
+            'MoS_AP_Mean','MoS_ML_Mean','MoS_HS_AP','MoS_HS_ML'};
 
-newNames = {'Single support time (%)','Double support time (%)','Stride width (mm)', ...
-            'Gait speed (m.s^{-1})','Stride length (m)', ...
-            'Normalized Walk ratio (ua)','Cadence (step.min^{-1})', ...
-            'Normalized Step length (ua)', 'Normalized Cadence (ua)'};
+newNames = {'Single support time (%)', 'Double support time (%)','Stride width (cm)', ...
+            'Gait speed (m.s^{-1})','Stride length (m)', 'Stride time (s)', ...
+            'Norm WR (ua)','Cadence (step.min^{-1})', ...
+            'Norm Step length (ua)', 'Norm Cadence (ua)', ...
+            'MoS AP Stance (mm)', 'MoS ML Stance (mm)', 'MoS AP HS (mm)', 'MoS ML HS (mm)'};
 
 renameMap = containers.Map(oldNames, newNames);
 prefixes = {'Mean_', 'CV_'};
@@ -287,15 +289,7 @@ end
 % Groupes d'âge (certains peuvent être absents)
 groupList = {'JeunesEnfants', 'Enfants', 'Adolescents', 'Adultes'};
 
-% Noms techniques d'origine
-originalNames = {'pctSimpleAppuie','DoubleSupport','LargeurPas','vitFoulee','distFoulee',...
-                 'NormWalkRatio','vitCadencePasParMinute','NormStepLength','NormCadence'};
-
-% Noms lisibles pour l'export
-newNames = {'Single support time (%)','Double support time (%)','Stride width (mm)', ...
-            'Gait speed (m.s^{-1})','Stride length (m)', ...
-            'Normalized Walk ratio (ua)','Cadence (step.min^{-1})', ...
-            'Normalized Step length (ua)', 'Normalized Cadence (ua)'};
+originalNames = oldNames;
 
 renameMap = containers.Map(originalNames, newNames);
 
@@ -444,77 +438,51 @@ end
 disp('=== RÉSULTATS ===');
 disp('Structure SpatioTemporalDATA sauvegardée avec succès.');
 
-%% RADAR PLOT DES PARAMETRES SPATIOTEMPORELS A LA MARCHE
+%% RADAR PLOTS 5 DOMAINES - INTER-GROUPES
 clc; clear; close all;
 cd('C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\result');
 addpath(genpath('C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\functions'));
 load('SpatioTemporalDATA.mat');
 
-% Dossier de sauvegarde
 save_path = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\result\Fig\SpatioTempo-DATA';
-
-% Créer le dossier s'il n'existe pas
 if ~exist(save_path, 'dir')
     mkdir(save_path);
 end
 
-% Paramètres étudiés
-param_names = {'Gait speed (m.s^{-1})','Stride length (m)', 'Normalized Step length (ua)', ...
-    'Normalized Walk ratio (ua)','Cadence (step.min^{-1})', 'Normalized Cadence (ua)', ...
-            'Single support time (%)','Double support time (%)', 'Stride width (mm)'};
 conditions = {'Plat', 'Medium', 'High'};
+groups = {'JeunesEnfants', 'Enfants', 'Adolescents', 'Adultes'};
 
+% === RADAR INTER-GROUPES (compare les groupes d'âge) ===
+fprintf('\n=== Génération des radar plots INTER-GROUPES ===\n');
 for i = 1:length(conditions)
     condition = conditions{i};
-    fig = radarGaitPlot(SpatioTemporalDATA, condition, param_names);
+    fig = radarGaitPlot_5Domains_Inter(SpatioTemporalDATA, condition, groups);
     
-    % Définir la taille de la figure avant sauvegarde
-    set(fig, 'Units', 'pixels', 'Position', [100, 100, 1200, 800]);
-    
-    % Sauvegarder la figure avec haute résolution
-    filename = fullfile(save_path, sprintf('RadarPlot_%s.png', condition));
+    set(fig, 'Units', 'pixels', 'Position', [100, 100, 1400, 1000]);
+    filename = fullfile(save_path, sprintf('RadarPlot_5Domains_Inter_%s.png', condition));
     print(fig, filename, '-dpng', '-r300');
-    fprintf('Figure sauvegardée : %s\n', filename);
+    fprintf('  ✅ %s\n', condition);
+    close(fig);
 end
 
-%%% === INTRAGROUPE JEUNES ENFANTS === %%%
-group = 'JeunesEnfants';
-colors = {[0.2 0.4 1], [0 0.6 0], [1 0 0]}; % bleu, vert, rouge
+% RADAR PLOTS 5 DOMAINES - INTRA-GROUPES
+fprintf('\n=== Génération des radar plots INTRA-GROUPES ===\n');
 
-fig_jeunes_mean = makeIntragroupRadar(SpatioTemporalDATA, group, conditions, param_names, colors);
-set(fig_jeunes_mean, 'Units', 'pixels', 'Position', [100, 100, 1200, 800]);
-filename = fullfile(save_path, 'RadarPlot_Intragroupe_JeunesEnfants.png');
-print(fig_jeunes_mean, filename, '-dpng', '-r300');
-fprintf('Figure sauvegardée : %s\n', filename);
+condColors = {[0.2 0.4 1], [0 0.6 0], [1 0 0]}; % Plat, Medium, High
 
-%%% === INTRAGROUPE ENFANTS === %%%
-group = 'Enfants';
+for g = 1:length(groups)
+    groupName = groups{g};
+    fig = radarGaitPlot_5Domains_Intra(SpatioTemporalDATA, groupName, conditions, condColors);
+    
+    set(fig, 'Units', 'pixels', 'Position', [100, 100, 1400, 1000]);
+    filename = fullfile(save_path, sprintf('RadarPlot_5Domains_Intra_%s.png', groupName));
+    print(fig, filename, '-dpng', '-r300');
+    fprintf('  ✅ %s\n', groupName);
+    close(fig);
+end
 
-fig_enfants_mean = makeIntragroupRadar(SpatioTemporalDATA, group, conditions, param_names, colors);
-set(fig_enfants_mean, 'Units', 'pixels', 'Position', [100, 100, 1200, 800]);
-filename = fullfile(save_path, 'RadarPlot_Intragroupe_Enfants.png');
-print(fig_enfants_mean, filename, '-dpng', '-r300');
-fprintf('Figure sauvegardée : %s\n', filename);
-
-%%% === INTRAGROUPE ADOLESCENTS === %%%
-group = 'Adolescents';
-
-fig_adolescents_mean = makeIntragroupRadar(SpatioTemporalDATA, group, conditions, param_names, colors);
-set(fig_adolescents_mean, 'Units', 'pixels', 'Position', [100, 100, 1200, 800]);
-filename = fullfile(save_path, 'RadarPlot_Intragroupe_Adolescents.png');
-print(fig_adolescents_mean, filename, '-dpng', '-r300');
-fprintf('Figure sauvegardée : %s\n', filename);
-
-%%% === INTRAGROUPE ADULTES === %%%
-group = 'Adultes';
-
-fig_adultes_mean = makeIntragroupRadar(SpatioTemporalDATA, group, conditions, param_names, colors);
-set(fig_adultes_mean, 'Units', 'pixels', 'Position', [100, 100, 1200, 800]);
-filename = fullfile(save_path, 'RadarPlot_Intragroupe_Adultes.png');
-print(fig_adultes_mean, filename, '-dpng', '-r300');
-fprintf('Figure sauvegardée : %s\n', filename);
-
-fprintf('\nToutes les figures ont été sauvegardées dans :\n%s\n', save_path);
+fprintf('\n✅ TOTAL: 7 radar plots générés (3 inter + 4 intra)\n');
+fprintf('📂 Sauvegardés dans: %s\n', save_path);
 
 %% NUAGE DE POINTS DE L'EVOLUTION DES PARAMETRES SPATIO-TEMPORELLES EN FONCTION DU TEMPS
 clc, clear, close all;
@@ -528,16 +496,27 @@ if ~exist(output_folder, 'dir')
     mkdir(output_folder);
 end
 
-% Variables à tracer
+% === DÉFINITION DES VARIABLES À TRACER (organisées par domaine) ===
 variables_to_plot = {
-    'Mean_Single support time (%)','Mean_Double support time (%)','Mean_Stride width (mm)', ...
-    'Mean_Gait speed (m.s^{-1})','Mean_Stride length (m)', ...
-    'Mean_Normalized Walk ratio (ua)','Mean_Cadence (step.min^{-1})', ...
-    'Mean_Normalized Step length (ua)', 'Mean_Normalized Cadence (ua)', ...
-    'CV_Single support time (%)','CV_Double support time (%)','CV_Stride width (mm)', ...
-    'CV_Gait speed (m.s^{-1})','CV_Stride length (m)', ...
-    'CV_Normalized Walk ratio (ua)','CV_Cadence (step.min^{-1})', ...
-    'CV_Normalized Step length (ua)', 'CV_Normalized Cadence (ua)'};
+    % PACE
+    'Mean_Gait speed (m.s^{-1})', 'Mean_Stride length (m)', 'Mean_Stride time (s)', ...
+    'CV_Gait speed (m.s^{-1})', 'CV_Stride length (m)', 'CV_Stride time (s)', ...
+    
+    % RHYTHM
+    'Mean_Cadence (step.min^{-1})', 'Mean_Normalized Cadence (ua)', 'Mean_Normalized Walk ratio (ua)', ...
+    
+    % STABILITY
+    'Mean_Stride width (cm)', 'Mean_MoS HS ML (mm)', 'Mean_Double support time (%)', ...
+    'Mean_Single support time (%)', ...
+    'Mean_MoS AP Mean (mm)', 'Mean_MoS ML Mean (mm)', 'Mean_MoS HS AP (mm)', ...
+    
+    % ASYMMETRY
+    'SI_Stride time (s)', 'SI_Stride length (m)', 'SI_Stride width (cm)', ...
+    
+    % VARIABILITY
+    'CV_Stride time (s)', 'CV_Stride length (m)', 'CV_Stride width (cm)', ...
+    'CV_Double support time (%)', 'CV_Single support time (%)'
+};
 
 % Couleurs pour les 3 surfaces
 color_map = containers.Map(...
@@ -549,39 +528,50 @@ DATA_all = [SpatioTemporalDATA.ALL.Plat; ...
             SpatioTemporalDATA.ALL.Medium; ...
             SpatioTemporalDATA.ALL.High];
 
-% Définir les tranches d’âge (en mois)
+% Définir les tranches d'âge (en mois)
 tranches = [36, 72; 72, 144; 144, 216; 216, 432];
 nTranches = size(tranches, 1);
+tranche_names = {'Young Children', 'Children', 'Adolescents', 'Adults'};
 
 % Boucle sur chaque variable
 for i = 1:length(variables_to_plot)
     varname = variables_to_plot{i};
+    
+    % Vérifier si la variable existe dans les données
+    if ~any(strcmp(DATA_all.Properties.VariableNames, varname))
+        fprintf('⚠️  Variable non trouvée : %s\n', varname);
+        continue;
+    end
 
-    figure;
+    fig = figure('Position', [100, 100, 1200, 700]);
     hold on;
 
-    % Lignes verticales pour les tranches d’âge
+    % Lignes verticales pour les tranches d'âge
     for t = 1:nTranches
-        xline(tranches(t,1), '--k', 'LineWidth', 1.2, 'HandleVisibility','off');
+        xline(tranches(t,1), '--', 'Color', [0.7 0.7 0.7], 'LineWidth', 1, 'HandleVisibility','off');
     end
-    xline(tranches(end,2), '--k', 'LineWidth', 1.2, 'HandleVisibility','off');
+    xline(tranches(end,2), '--', 'Color', [0.7 0.7 0.7], 'LineWidth', 1, 'HandleVisibility','off');
 
+    % Structure pour stocker les points d'inflexion
+    inflection_info = struct();
+    
     % Boucle sur les surfaces
-    for cond = {'Plat', 'Medium', 'High'}
-        cond_name = cond{1};
+    conditions = {'Plat', 'Medium', 'High'};
+    for c = 1:length(conditions)
+        cond_name = conditions{c};
         color = color_map(cond_name);
         data_cond = DATA_all(strcmp(DATA_all.Condition, cond_name), :);
 
-        % Tracer les points individuels
+        % --- Nuage de points individuels
         scatter(data_cond.AgeMonths, data_cond.(varname), 20, ...
-    'filled', ...
-    'MarkerFaceColor', color, ...
-    'MarkerEdgeColor', color, ...
-    'MarkerFaceAlpha', 0.25, ...
-    'MarkerEdgeAlpha', 0.25, ...
-    'DisplayName', cond_name);
+            'filled', ...
+            'MarkerFaceColor', color, ...
+            'MarkerEdgeColor', color, ...
+            'MarkerFaceAlpha', 0.25, ...
+            'MarkerEdgeAlpha', 0.25, ...
+            'DisplayName', cond_name);
 
-        % Moyennes et SD par tranche
+        % --- Moyennes et SD par tranche
         moyennes = nan(nTranches,1);
         SD = nan(nTranches,1);
         x_center = nan(nTranches,1);
@@ -600,24 +590,131 @@ for i = 1:length(variables_to_plot)
             end
         end
 
-        % Tracer moyennes avec barres d’erreur
+        % --- Tracer moyennes avec barres d'erreur
         errorbar(x_center, moyennes, SD, '-', ...
             'Color', color, 'LineWidth', 2, ...
             'Marker', 'o', 'MarkerFaceColor', color, ...
-            'CapSize', 6, 'DisplayName', ['Moyenne ' cond_name]);
+            'CapSize', 6, 'DisplayName', ['Mean ' cond_name]);
+
+        % --- SPLINE LISSEE SUR LES POINTS INDIVIDUELS (plus robuste)
+        x = data_cond.AgeMonths;
+        y = data_cond.(varname);
+        valid = ~isnan(x) & ~isnan(y);
+        x = x(valid); y = y(valid);
+        [x, ord] = sort(x); y = y(ord);
+
+        try
+            if numel(x) >= 10
+                p_smooth = 0.90;                 % 0.85–0.95 selon le bruit
+                sp = csaps(x, y, p_smooth);      % spline de lissage
+
+                % Courbe lissée pour visuel
+                xx = linspace(min(x), max(x), 300);
+                yy = fnval(sp, xx);
+                plot(xx, yy, '-', 'Color', min(color*0.8 + 0.2, 1), 'LineWidth', 2.5, ...
+                    'DisplayName', [cond_name ' (spline)']);
+
+                % === DÉTECTION DU POINT D'INFLEXION (2e dérivée = 0)
+                sp2 = fnder(sp, 2);
+                z = fnzeros(sp2, [min(x) max(x)]);
+
+                % Normaliser la sortie de fnzeros en liste de candidats
+                if isempty(z)
+                    x0 = [];
+                elseif isvector(z)
+                    x0 = z(:).';
+                else
+                    x0 = mean(z,1); % centres des intervalles de zéro
+                end
+
+                % Filtre: éviter les bords (artefacts fréquents)
+                if ~isempty(x0)
+                    margin = 0.05*(max(x)-min(x));
+                    x0 = x0(x0 > (min(x)+margin) & x0 < (max(x)-margin));
+                end
+
+                if ~isempty(x0)
+                    % Intensité d'inflexion via 3e dérivée
+                    sp3 = fnder(sp, 3);
+                    [~, ixbest] = max(abs(fnval(sp3, x0)));
+
+                    x_inf = x0(ixbest);
+                    y_inf = fnval(sp, x_inf);
+
+                    % Marquer le point d'inflexion
+                    plot(x_inf, y_inf, 'p', ...
+                        'MarkerSize', 12, 'MarkerFaceColor', color, ...
+                        'MarkerEdgeColor', 'k', 'LineWidth', 1.5, ...
+                        'HandleVisibility', 'off');
+
+                    % Rattacher à la tranche correspondante pour ton annotation
+                    t_idx = find(tranches(:,1) <= x_inf & x_inf < tranches(:,2), 1, 'first');
+                    if isempty(t_idx)
+                        % si x_inf est à la toute fin, le rattacher à la dernière tranche
+                        t_idx = nTranches;
+                    end
+
+                    inflection_info.(cond_name).method       = 'spline-2nd-deriv';
+                    inflection_info.(cond_name).x_pos        = x_inf;
+                    inflection_info.(cond_name).value        = y_inf;
+                    inflection_info.(cond_name).tranche      = t_idx;
+                    inflection_info.(cond_name).age_range    = tranches(t_idx, :);
+                    inflection_info.(cond_name).tranche_name = tranche_names{t_idx};
+                end
+            end
+        catch ME
+            % Fallback propre si Spline Toolbox absent ou autre souci
+            warning('Spline/derivative step failed for %s (%s): %s', cond_name, varname, ME.message);
+        end
+
+    end % fin boucle conditions
+
+    % === ANNOTATION DES POINTS D'INFLEXION ===
+    if ~isempty(fieldnames(inflection_info))
+        annotation_text = {'\bfInflection Points:'};
+        y_offset = 0.88; % Position verticale de départ
+        
+        for c = 1:length(conditions)
+            cond_name = conditions{c};
+            if isfield(inflection_info, cond_name)
+                info = inflection_info.(cond_name);
+                color = color_map(cond_name);
+
+                text_line = sprintf('\\color[rgb]{%.2f %.2f %.2f}%s: %s (%.0f-%.0f mo) — x\\_inf=%.0f mo', ...
+                    color(1), color(2), color(3), ...
+                    cond_name, info.tranche_name, ...
+                    info.age_range(1), info.age_range(2), ...
+                    info.x_pos);
+
+                annotation_text{end+1} = text_line; %#ok<AGROW>
+            end
+        end
+        
+        annotation('textbox', [0.62 y_offset 0.35 0.12], ...
+            'String', annotation_text, ...
+            'FitBoxToText', 'on', ...
+            'BackgroundColor', 'white', ...
+            'EdgeColor', [0.3 0.3 0.3], ...
+            'LineWidth', 1, ...
+            'FontSize', 9, ...
+            'Interpreter', 'tex');
     end
 
-    % Mise en forme
-    xlabel('Âge (mois)', 'FontSize', 12);
-    ylabel(varname, 'Interpreter','none', 'FontSize', 12);
-   title({[strrep(varname, '_', ' ')]}, 'FontSize', 13);
-    legend('Location','eastoutside', 'Box', 'off');
-    grid on;
-    box on;
+    % === MISE EN FORME ===
+    xlabel('Age (months)', 'FontSize', 12, 'FontWeight', 'bold');
+    ylabel(strrep(varname, '_', ' '), 'Interpreter', 'tex', 'FontSize', 12, 'FontWeight', 'bold');
+    title(strrep(varname, '_', ' '), 'FontSize', 13, 'FontWeight', 'bold', 'Interpreter', 'tex');
+    
+    legend('Location', 'eastoutside', 'Box', 'off', 'FontSize', 10);
+    grid on; box on;
+    ax = gca; ax.GridAlpha = 0.3; ax.GridLineStyle = ':';
 
     % Sauvegarde
-    saveas(gcf, fullfile(output_folder, [regexprep(varname, '[^\w]', '_') '_vs_Age_Moyennes.png']));
-    close;
+    safe_varname = regexprep(varname, '[^\w]', '_');
+    saveas(gcf, fullfile(output_folder, [safe_varname '_vs_Age_Inflection.png']));
+    close(gcf);
+    
+    fprintf('✅ Figure générée : %s\n', varname);
 end
 
-disp("✅ Figures générées avec moyennes ± SD par tranche et par surface.");
+disp("✅ Toutes les figures générées avec points d'inflexion détectés.");
