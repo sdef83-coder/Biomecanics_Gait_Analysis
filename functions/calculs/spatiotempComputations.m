@@ -43,6 +43,12 @@ function results = spatiotempComputations(data, results)
         % Largeur de pas (en cm) - distance médio-latérale entre les talons au contact
         results.(side).LargeurPas = abs(data.(side).markers.([s 'HEE'])(data.(side).stamps.([side '_Foot_Strike']).frameStamp(1),1) - ...
                          data.(side).markers.([os 'HEE'])(data.(side).stamps.([oppositeSide '_Foot_Strike']).frameStamp,1)) / 10;
+        if s == 'L'
+    results.(side).LLargeurPas = results.(side).LargeurPas;
+else
+    results.(side).RLargeurPas = results.(side).LargeurPas;
+end
+
 
         % Temps (en s) d'une foulÃ©e
         results.(side).tempsFoulee = data.(side).tempsCycle;

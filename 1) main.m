@@ -6,7 +6,7 @@ clc
 clear
 close all;
 
-cd('C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI')
+cd('C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\Biomecanics_Gait_Analysis')
 
 addpath('Libs');
 addpath(genpath('functions'));
