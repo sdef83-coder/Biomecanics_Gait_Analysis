@@ -58,26 +58,25 @@ end
 
 % === NOUVEAUX PARTICIPANTS (à ajouter) ===
 
-% A FAIRE TOURNER ! JE NE L'AI PAS FAIS TOURNER HIER CAR PAS FAIS LE MAIN
-% SCRIPT
-
-l0_map('CTL_??') = 0.?? ;% Nouveau participant - décommentez si besoin de rajouter un participant
+l0_map('CTL_03') = 0.815 ; % Nouveau participant - décommentez si besoin de rajouter un participant
+l0_map('CTL_13') = 0.90 ;
+l0_map('CTL_22') = 0.9925 ;
+l0_map('CTL_29') = 0.945 ;
+l0_map('CTL_31') = 0.6175 ;
+l0_map('CTL_38') = 0.6565 ;
+l0_map('CTL_39') = 0.623 ;
+l0_map('CTL_44') = 0.6825 ;
+l0_map('CTL_46') = 0.646 ;
+l0_map('CTL_65') = 0.472 ;
 
 % l0_map('CTL_21') = 0.90 ; Si besoin
-% l0_map('CTL_22') = 0.9925 ;
-% l0_map('CTL_29') = 0.945 ;
 % l0_map('CTL_30') = 0.975 ;
-% l0_map('CTL_31') = 0.6175 ;
 % l0_map('CTL_33') = 0.90 ;
 % l0_map('CTL_36') = 0.952 ;
-% l0_map('CTL_38') = 0.6565 ;
-% l0_map('CTL_39') = 0.623 ;
 % l0_map('CTL_41') = 0.851 ;
 % l0_map('CTL_42') = 1.00 ;
 % l0_map('CTL_43') = 0.92 ;
-% l0_map('CTL_44') = 0.6825 ;
 % l0_map('CTL_45') = 0.9625 ;
-% l0_map('CTL_46') = 0.646 ;
 % l0_map('CTL_49') = 0.905 ;
 
 % Sauvegarder dans le répertoire spécifié

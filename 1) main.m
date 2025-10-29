@@ -6,7 +6,7 @@ clc
 clear
 close all;
 
-cd('C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\Biomecanics_Gait_Analysis')
+cd('C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI')
 
 addpath('Libs');
 addpath(genpath('functions'));
@@ -45,9 +45,6 @@ end
     
     % Extraction et calculs sur la cinétique
     c.results = kineticsComputations(c.data, c.results);
-
-    % Calcul de la marge de stabilité
-    c.results = mosComputations(c.data, c.results);
     
     % Copy struct si un côté est inexistant
     c.results = createEmptyIfNecessary(c.results);
@@ -73,9 +70,6 @@ end
 
                 % Extraction et calculs sur la cinétique
                 resultTP.(s) = kineticsComputations(c.dataAll.(s).(t)(i), resultTP).(s);
-
-                % Marge de stabilité
-                resultTP.(s) = mosComputations(c.dataAll.(s).(t)(i), resultTP).(s);
 
                 % Copy struct si un côté est inexistant
                 resultTP.(s) = createEmptyIfNecessary(resultTP).(s);
