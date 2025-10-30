@@ -9,17 +9,17 @@ addpath(genpath('C:\Users\silve\OneDrive - Universite de Montreal\Silvere De Fre
 addpath(genpath('C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\functions'));
 
 %% === PARAMÈTRES À MODIFIER ===
-sujet_id = 'CTL_46';                              % ID du sujet à traiter
+sujet_id = 'CTL_32';                              % ID du sujet à traiter
 surfaces = {'Plat', 'Medium', 'High'};            % Surfaces étudiées
 essais = 1:10;                                    % Numéros des essais
-base_dir = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\Data\enfants';    % Dossier contenant les C3D
+base_dir = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\Data\adults';    % Dossier contenant les C3D
 output_file_csv = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\result\MoS\MoS.csv';
 output_file_mat = sprintf('C:\\Users\\silve\\Desktop\\DOCTORAT\\UNIV MONTREAL\\TRAVAUX-THESE\\Surfaces_Irregulieres\\Datas\\Script\\gaitAnalysisGUI\\result\\MoS\\MoS_results_%s.mat', sujet_id);
 
 % Fréquence d'acquisition
 freqVicon = 100;  % Fréquence Vicon (Hz)
 
-%% === Longueur de jambe L0 (pour normalisation) ===
+% === Longueur de jambe L0 (pour normalisation) ===
 load('l0_participants.mat', 'l0_map');   % structure containers.Map : key=participant, value=L0 (en m)
 participant = sujet_id;
 
@@ -31,10 +31,10 @@ else
     error('Participant %s non trouvé dans l0_map.', participant); % <-- pas de "continue" ici
 end
 
-%% === INITIALISATION DU TABLEAU DE RÉSULTATS ===
+% === INITIALISATION DU TABLEAU DE RÉSULTATS ===
 results = table();
 
-%% === BOUCLE DE TRAITEMENT ===
+% === BOUCLE DE TRAITEMENT ===
 fprintf('🔄 Traitement du sujet %s...\n\n', sujet_id);
 
 for surf_idx = 1:length(surfaces)
@@ -223,7 +223,7 @@ end
     end
 end
 
-%% === SAUVEGARDE ===
+% === SAUVEGARDE ===
 if height(results) > 0
     fprintf('💾 Sauvegarde des résultats...\n');
     
@@ -416,10 +416,16 @@ end
     M5_x = positions.(m5_marker_side)(:, 1);
     
     % Calcul MoS antéro-postérieur (AP)
-    MoS_AP_heel = HEEL_y(heel_strike_frame:heel_off_frame) - ...
-                  xCOM_y(heel_strike_frame:heel_off_frame);
-    MoS_AP_toe = TOE_y(heel_off_frame:toe_off_frame) - ...
-                 xCOM_y(heel_off_frame:toe_off_frame);
+    if TOE_y(toe_off_frame) - HEEL_y(heel_strike_frame) > 0
+        directionAP = 1;
+    else
+        directionAP = -1;
+    end
+
+    MoS_AP_heel = (HEEL_y(heel_strike_frame:heel_off_frame) - ...
+               xCOM_y(heel_strike_frame:heel_off_frame)) * directionAP;
+    MoS_AP_toe  = (TOE_y(heel_off_frame:toe_off_frame) - ...
+               xCOM_y(heel_off_frame:toe_off_frame)) * directionAP;
     MoS_AP_Mean = mean([mean(MoS_AP_heel), mean(MoS_AP_toe)]);
     
     % Calcul MoS médio-latéral (ML)

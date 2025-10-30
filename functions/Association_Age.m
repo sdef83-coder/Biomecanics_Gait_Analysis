@@ -68,8 +68,6 @@ switch participant
     case 'CTL_63', age = 49;
     case 'CTL_64', age = 299;
     case 'CTL_65', age = 44;
-    case 'CTL_66', age = 158;
-    case 'CTL_67', age = 53;
 
     otherwise, age = NaN;
 end

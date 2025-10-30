@@ -268,3 +268,214 @@ end
 % Affichage des informations sur le nombre de participants
 disp(['Nombre de participants: ' num2str(length(Participant))]);
 disp(['Toutes les figures et matrices ont été sauvegardées dans: ' save_path]);
+
+%% FIGURES UNIQUEMENT : Effet de l'âge & Effet de la surface (sans SPM) + bandes d'écart-type
+% À coller à la place de toute la section "%% ANALYSE SPM : ..." (on ne fait plus de SPM)
+
+clc;
+clear;
+close all;
+
+% Chemins
+base_path     = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI';
+matrices_path = fullfile(base_path, 'result', 'Fig');            % là où sont les MATRICES<groupe>.mat
+save_path     = fullfile(matrices_path, 'Comparatifs');          % nouveau dossier pour ces figures
+
+if ~exist(save_path, 'dir'); mkdir(save_path); end
+
+% Définir groupes / conditions / plans / articulations
+Groupes       = {'JeunesEnfants', 'Enfants', 'Adolescents', 'Adultes'};
+Condition     = {'Plat', 'Medium', 'High'};
+Plan          = {'Sagittal', 'Frontal', 'Transverse'};
+Articulations = {'Ankle', 'Knee', 'Hip'};
+
+% Couleurs cohérentes avec tes anciennes figures
+couleurs_groupes = [0.2 0.6 1.0;    % Bleu clair - Jeunes Enfants
+                    0.0 0.4 0.8;    % Bleu - Enfants
+                    1.0 0.6 0.2;    % Orange - Adolescents
+                    0.8 0.2 0.2];   % Rouge - Adultes
+
+couleurs_conditions = [0.2 0.4 0.8;  % Bleu - Plat
+                       0.2 0.7 0.3;  % Vert - Medium
+                       0.8 0.2 0.2]; % Rouge - High
+
+face_alpha = 0.18;  % transparence des zones ±1 SD
+
+%% Chargement des matrices pour tous les groupes
+disp('Chargement des matrices pour tous les groupes (sans SPM)...');
+ALL_DATA = struct();
+for iG = 1:length(Groupes)
+    groupe = Groupes{iG};
+    mat_file = fullfile(matrices_path, ['MATRICES' groupe '.mat']);
+    if exist(mat_file, 'file')
+        S = load(mat_file, 'MATRICES');
+        ALL_DATA.(groupe) = S.MATRICES;
+        disp(['  ✓ Chargé: ' groupe]);
+    else
+        warning(['  ✗ Introuvable: ' mat_file '  (les figures pour ce groupe seront ignorées)']);
+    end
+end
+
+% Filtre : garder seulement les groupes effectivement chargés
+Groupes = intersect(Groupes, fieldnames(ALL_DATA)', 'stable');
+
+if isempty(Groupes)
+    error('Aucun fichier MATRICES<niveau>.mat trouvé. Exécute d''abord la 1ère partie pour chaque groupe.');
+end
+
+%% FIGURE 1 : Effet de l'âge (par surface) — moyennes + ±1 SD
+% 1 figure par (plan × articulation), avec 3 sous-graphiques = surfaces
+disp('=== Génération Figure 1 : Effet de l''âge par surface (moyennes + ±1 SD) ===');
+
+for iPlane = 1:length(Plan)
+    plane = Plan{iPlane};
+
+    for iA = 1:length(Articulations)
+        articulation = Articulations{iA};
+
+        fig1 = figure('Name', ['Effet AGE - ' articulation ' - ' plane], ...
+                      'Position', [80, 80, 1800, 520]);
+
+        for iC = 1:length(Condition)
+            condition = Condition{iC};
+            subplot(1, 3, iC); hold on;
+
+            x = [];  % sera défini au 1er groupe valide
+            traces = 0;
+
+            for iG = 1:length(Groupes)
+                groupe = Groupes{iG};
+
+                % Données N×Q (participants × %cycle)
+                if ~isfield(ALL_DATA.(groupe).(plane).(articulation), condition)
+                    continue;
+                end
+                Y = ALL_DATA.(groupe).(plane).(articulation).(condition);
+                if isempty(Y); continue; end
+
+                % Retirer lignes avec NaN
+                Y = Y(~any(isnan(Y),2), :);
+                if size(Y,1) < 1, continue; end
+
+                if isempty(x)
+                    Q = size(Y,2);
+                    x = linspace(0, 100, Q);
+                end
+
+                m = mean(Y,1);
+                s = std(Y,0,1);
+
+                % Bande ±1 SD
+                if size(Y,1) >= 2
+                    xx = [x, fliplr(x)];
+                    yy = [m + s, fliplr(m - s)];
+                    fill(xx, yy, couleurs_groupes(iG,:), 'FaceAlpha', face_alpha, ...
+                        'EdgeColor', 'none', 'HandleVisibility', 'off');
+                end
+
+                % Courbe moyenne
+                plot(x, m, 'LineWidth', 2, ...
+                    'Color', couleurs_groupes(iG,:), ...
+                    'DisplayName', groupe);
+                traces = traces + 1;
+            end
+
+            title([condition]);
+            xlabel('Cycle de marche (%)');
+            ylabel('Angle (°)');
+            grid on;
+            if traces>0, legend('Location','best'); end
+            hold off;
+        end
+
+        sgtitle(['EFFET DE L''ÂGE — ' articulation ' — Plan ' plane], ...
+                'FontSize', 14, 'FontWeight', 'bold');
+
+        fig_name = fullfile(save_path, ['EffetAge_' articulation '_' plane]);
+        savefig(fig1, [fig_name '.fig']);
+        print(fig1, [fig_name '.png'], '-dpng', '-r300');
+        disp(['  ✓ Sauvegardé: ' fig_name '.png']);
+        close(fig1);
+    end
+end
+
+%% FIGURE 2 : Effet de la surface (par groupe d'âge) — moyennes + ±1 SD
+% 1 figure par (plan × articulation), avec 4 sous-graphiques = groupes d'âge
+disp('=== Génération Figure 2 : Effet de la surface par groupe d''âge (moyennes + ±1 SD) ===');
+
+for iPlane = 1:length(Plan)
+    plane = Plan{iPlane};
+
+    for iA = 1:length(Articulations)
+        articulation = Articulations{iA};
+
+        fig2 = figure('Name', ['Effet SURFACE - ' articulation ' - ' plane], ...
+                      'Position', [80, 80, 1800, 900]);
+
+        for iG = 1:length(Groupes)
+            groupe = Groupes{iG};
+            subplot(2, 2, iG); hold on;
+
+            traces = 0;
+            x = [];
+
+            % Boucle sur les 3 surfaces
+            for iC = 1:length(Condition)
+                condition = Condition{iC};
+
+                if ~isfield(ALL_DATA.(groupe).(plane).(articulation), condition)
+                    continue;
+                end
+                Y = ALL_DATA.(groupe).(plane).(articulation).(condition);
+                if isempty(Y), continue; end
+
+                % Nettoyage NaN
+                Y = Y(~any(isnan(Y),2), :);
+                if size(Y,1) < 1, continue; end
+
+                if isempty(x)
+                    Q = size(Y,2);
+                    x = linspace(0, 100, Q);
+                end
+
+                m = mean(Y,1);
+                s = std(Y,0,1);
+
+                % Bande ±1 SD
+                if size(Y,1) >= 2
+                    xx = [x, fliplr(x)];
+                    yy = [m + s, fliplr(m - s)];
+                    fill(xx, yy, couleurs_conditions(iC,:), 'FaceAlpha', face_alpha, ...
+                        'EdgeColor', 'none', 'HandleVisibility', 'off');
+                end
+
+                % Courbe moyenne
+                plot(x, m, 'LineWidth', 2, ...
+                    'Color', couleurs_conditions(iC,:), ...
+                    'DisplayName', condition);
+                traces = traces + 1;
+            end
+
+            title(groupe);
+            xlabel('Cycle de marche (%)');
+            ylabel('Angle (°)');
+            grid on;
+            if traces>0, legend('Location','best'); end
+            hold off;
+        end
+
+        sgtitle(['EFFET DE LA SURFACE — ' articulation ' — Plan ' plane], ...
+                'FontSize', 14, 'FontWeight', 'bold');
+
+        fig_name = fullfile(save_path, ['EffetSurface_' articulation '_' plane]);
+        savefig(fig2, [fig_name '.fig']);
+        print(fig2, [fig_name '.png'], '-dpng', '-r300');
+        disp(['  ✓ Sauvegardé: ' fig_name '.png']);
+        close(fig2);
+    end
+end
+
+disp('=======================================================');
+disp('OK ! Figures générées avec bandes ±1 SD (sans SPM).');
+disp(['Toutes les figures sont dans : ' save_path]);
+disp('=======================================================');
