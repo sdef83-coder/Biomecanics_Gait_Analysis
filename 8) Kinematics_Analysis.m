@@ -3,19 +3,21 @@
 clc;
 clear;
 close all;
+
 cd('C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\result\matfiles\ALL')
 addpath('C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI');
+
 % Définir le chemin pour l'enregistrement des résultats
-save_path = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\result\Fig';
+save_path = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\result\Kinematics';
 % Vérifier si le dossier existe, sinon le créer
 if ~exist(save_path, 'dir')
     mkdir(save_path);
     disp(['Création du dossier de sauvegarde: ' save_path]);
 end
 % Définir le chemin d'enregistrement des CSV
-csv_path = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\result\Matrice\CSV';
+csv_path = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\result\Kinematics\Csv';
 % Charger les groupes de participants
-groupe_a_etudier = 'Adolescents'; % 'Enfants', 'Adolescents', 'Adultes',
+groupe_a_etudier = 'Adultes'; % 'JeunesEnfants', 'Enfants', 'Adolescents', 'Adultes',
 ParticipantGroup;
 Participant = Group.(groupe_a_etudier);
 Condition = {'Plat' 'Medium' 'High'};
@@ -153,9 +155,8 @@ matrices_file = fullfile(save_path, ['MATRICES' groupe_a_etudier '.mat']);
 save(matrices_file, 'MATRICES');
 disp(['Structure MATRICES sauvegardée dans le fichier: ' matrices_file]);
 
-% Définir le chemin d'enregistrement des CSV
 % Définir le chemin d'enregistrement des CSV dans le sous-dossier du groupe
-csv_base_path = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\result\Matrice\CSV';
+csv_base_path = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\result\Kinematics\Csv';
 csv_path = fullfile(csv_base_path, groupe_a_etudier);
 
 % Créer le dossier s'il n'existe pas
@@ -278,7 +279,7 @@ close all;
 
 % Chemins
 base_path     = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI';
-matrices_path = fullfile(base_path, 'result', 'Fig');            % là où sont les MATRICES<groupe>.mat
+matrices_path = fullfile(base_path, 'result', 'Kinematics');            % là où sont les MATRICES<groupe>.mat
 save_path     = fullfile(matrices_path, 'Comparatifs');          % nouveau dossier pour ces figures
 
 if ~exist(save_path, 'dir'); mkdir(save_path); end
@@ -290,10 +291,10 @@ Plan          = {'Sagittal', 'Frontal', 'Transverse'};
 Articulations = {'Ankle', 'Knee', 'Hip'};
 
 % Couleurs cohérentes avec tes anciennes figures
-couleurs_groupes = [0.2 0.6 1.0;    % Bleu clair - Jeunes Enfants
-                    0.0 0.4 0.8;    % Bleu - Enfants
-                    1.0 0.6 0.2;    % Orange - Adolescents
-                    0.8 0.2 0.2];   % Rouge - Adultes
+couleurs_groupes = [0 0.6 1;    % Bleu clair - Jeunes Enfants
+                    1 0.5 0;    % Bleu - Enfants
+                    0 0.7 0.3;    % Orange - Adolescents
+                    0.5 0 1];   % Rouge - Adultes
 
 couleurs_conditions = [0.2 0.4 0.8;  % Bleu - Plat
                        0.2 0.7 0.3;  % Vert - Medium
@@ -302,7 +303,7 @@ couleurs_conditions = [0.2 0.4 0.8;  % Bleu - Plat
 face_alpha = 0.18;  % transparence des zones ±1 SD
 
 %% Chargement des matrices pour tous les groupes
-disp('Chargement des matrices pour tous les groupes (sans SPM)...');
+disp('Chargement des matrices pour tous les groupes ...');
 ALL_DATA = struct();
 for iG = 1:length(Groupes)
     groupe = Groupes{iG};
@@ -479,3 +480,19 @@ disp('=======================================================');
 disp('OK ! Figures générées avec bandes ±1 SD (sans SPM).');
 disp(['Toutes les figures sont dans : ' save_path]);
 disp('=======================================================');
+
+%% =========================================
+% SMP1D Analysis
+
+clc; clear, close all;
+
+spm_path  = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\functions\spm1dmatlab-master';
+data_path = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\result\Kinematics';
+addpath(spm_path);
+
+group_names = {'JeunesEnfants','Enfants','Adolescents','Adultes'};  % ordre = âge
+plans       = {'Sagittal','Frontal','Transverse'};
+artics      = {'Ankle','Knee','Hip'};
+conditions  = {'Plat','Medium','High'};
+
+alpha = 0.05;
