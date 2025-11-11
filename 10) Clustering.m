@@ -1,574 +1,648 @@
-%% CLUSTERING NON SUPERVISE (K-MEANS) SUR LES VARIABLES SPATIO-TEMPORELLES A LA MARCHE
+%% CLUSTERING SPATIO-TEMPOREL — PUBLICATION-GRADE (k-means robuste, nPC >= 70% var.)
+% - ACP commune (z-score), clustering sur nPC_final (variance cumulée >= 70%)
+% - Viz PC1–PC2 (gradient d'âge), mais partition apprise sur nPC_final
+% - Sélection de k par vote multi-critères (Sil, CH, DBI, Gap-1SE) + Stabilité (bootstrap ARI)
+% - Rapports "littéraires" : z & unités réelles, Cohen's d, tests (ANOVA/Kruskal) + FDR
+% - Analyses GLOBAL + PAR CONDITION (Plat/Medium/High), exports CSV/PNG
+
 clc; clear; close all;
 
 % === Dossier d'E/S ===
 root_path = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\result';
 cd(root_path)
-load('SpatioTemporalDATA.mat')
+load('SpatioTemporalDATA.mat') % attend SpatioTemporalDATA.ALL.(Plat|Medium|High)
 
 outdir = fullfile(root_path, 'Fig', 'Clustering');
 if ~exist(outdir, 'dir'); mkdir(outdir); end
 ts = string(datetime('now','Format','yyyyMMdd_HHmm')); % horodatage
 
-% 1) Variables d'intérêt (Mean + CV)
-varsMean = { ...
-    'Mean_Double support time (%)', ...
-    'Mean_Stride width (mm)', ...
-    'Mean_Gait speed (m.s^{-1})', ...
-    'Mean_Normalized Walk ratio (ua)', ...
-    'Mean_Normalized Step length (ua)', ...
-    'Mean_Normalized Cadence (ua)'};
-varsCV = strrep(varsMean, 'Mean_', 'CV_');
-allVars = [varsMean, varsCV];
+% === Domaines de clustering (5 catégories) ===
+domains = struct();
 
-% 2) Conditions et couleurs associées
+domains.Pace = {
+    'vitFoulee',      'Gait speed (m.s^{-1})',     'Mean';
+    'NormCadence',    'Norm Cadence (ua)',         'Mean';
+    'NormStepLength', 'Norm Step length (ua)',     'Mean';
+    'NormWalkRatio',  'Norm WR (ua)',              'Mean'
+};
+
+domains.Rhythm = {
+    'DoubleSupport',  'Double support time (%)',   'Mean'
+};
+
+domains.Stability = {
+    'LargeurPas',     'Stride width (cm)',         'Mean';
+    'MoS_ML_HS_pL0',  'MoS ML HS (%L0)',           'Mean';
+    'MoS_AP_HS_pL0',  'MoS AP HS (%L0)',           'Mean'
+};
+
+domains.Asymmetry = {
+    'distFoulee',     'Stride length (m)',         'SI';
+    'DoubleSupport',  'Double support time (%)',   'SI';
+    'LargeurPas',     'Stride width (cm)',         'SI';
+};
+
+domains.Variability = {
+    'distFoulee',     'Stride length (m)',         'CV';
+    'LargeurPas',     'Stride width (cm)',         'CV';
+    'vitFoulee',      'Gait speed (m.s^{-1})',     'CV'  
+};
+
+% === Mapping "nom technique" → "nom lisible" (ce que connaît la table) ===
+nameMap = containers.Map;
+nameMap('vitFoulee')               = 'Gait speed (m.s^{-1})';
+nameMap('distFoulee')              = 'Stride length (m)';
+nameMap('NormStepLength')          = 'Norm Step length (ua)';
+nameMap('tempsFoulee')             = 'Stride time (s)';
+nameMap('vitCadencePasParMinute')  = 'Cadence (step.min^{-1})';
+nameMap('NormCadence')             = 'Norm Cadence (ua)';
+nameMap('NormWalkRatio')           = 'Norm WR (ua)';
+nameMap('LargeurPas')              = 'Stride width (cm)';
+nameMap('DoubleSupport')           = 'Double support time (%)';
+nameMap('MoS_AP_HS_pL0')           = 'MoS AP HS (%L0)';
+nameMap('MoS_ML_HS_pL0')           = 'MoS ML HS (%L0)';
+
+% === Construction automatique de allVars depuis les domaines ===
+allVars = {};
+domainNames = fieldnames(domains);
+
+for d = 1:numel(domainNames)
+    dVars = domains.(domainNames{d});
+    for v = 1:size(dVars, 1)
+        varTech = dVars{v,1};  % ex: 'vitFoulee'
+        varType = dVars{v,3};  % 'Mean', 'SI', ou 'CV'
+        
+        % Construire le nom complet : "Mean_Gait speed (m.s^{-1})"
+        baseName = nameMap(varTech);
+        fullVarName = [varType '_' baseName];
+        
+        % Éviter les doublons
+        if ~ismember(fullVarName, allVars)
+            allVars{end+1} = fullVarName; %#ok<SAGROW>
+        end
+    end
+end
+
+fprintf('\n=== VARIABLES SÉLECTIONNÉES POUR LE CLUSTERING ===\n');
+fprintf('Total : %d variables réparties en 5 domaines\n', numel(allVars));
+for d = 1:numel(domainNames)
+    dName = domainNames{d};
+    nVars = size(domains.(dName), 1);
+    fprintf('  - %s : %d variables\n', dName, nVars);
+end
+fprintf('\nListe complète :\n');
+disp(allVars');
+
+% === Version "affichage" des noms (sans unités) ===
+allVars_disp = allVars;
+for i = 1:numel(allVars_disp)
+    % cas spécifique : CV_Gait speed (m.s^{-1}) -> CV_Stride speed
+    if strcmp(allVars_disp{i}, 'CV_Gait speed (m.s^{-1})')
+        allVars_disp{i} = 'CV_Stride speed';
+        continue;
+    end
+    % supprimer les unités entre parenthèses partout ailleurs
+    allVars_disp{i} = regexprep(allVars_disp{i}, '\s*\([^)]*\)', '');
+    allVars_disp{i} = strtrim(regexprep(allVars_disp{i}, '\s+', ' '));
+end
+
+% === Conditions ===
 conds = {'Plat','Medium','High'};
-colors = struct('Plat','b','Medium','g','High','r'); %#ok<NASGU>
 
-% 3) Préallocation
+% === Concaténation des données ===
 dataMat = [];
 meta = table();  % Condition, Participant, AgeMonths
 
-% 4) Lecture et concaténation des données
 for iC = 1:numel(conds)
     cond = conds{iC};
     T = SpatioTemporalDATA.ALL.(cond);
     mask = all(~ismissing(T(:, allVars)), 2);
     Tsel = T(mask, :);
     X = Tsel{:, allVars};
-    dataMat = [dataMat; X];
+    dataMat = [dataMat; X]; %#ok<AGROW>
     n = size(X,1);
     meta = [meta; table(repmat(string(cond),n,1), Tsel.Participant, Tsel.AgeMonths, ...
-        'VariableNames',{'Condition','Participant','AgeMonths'})];
+        'VariableNames',{'Condition','Participant','AgeMonths'})]; %#ok<AGROW>
 end
 
-% 4b) Ajoute colonne Groupe d'âge (catégories fixes)
+% Groupes d'âge (catégories fixes)
 meta.AgeGroup = arrayfun(@(m) age_group_from_months(m), meta.AgeMonths, 'UniformOutput', false);
 meta.AgeGroup = string(meta.AgeGroup);
 
-% 5) Normalisation (z-score)
+% === Normalisation & ACP commune ===
 dataNorm = zscore(dataMat);
+[coeff, score, ~, ~, explained] = pca(dataNorm);   % base commune
 
-% 6) ACP (sur les variables normalisées) — BASE COMMUNE
-[coeff, score, ~, ~, explained] = pca(dataNorm);
+% === COURBE DE VARIANCE EXPLIQUÉE ===
+fig_var = figure('Color','w');
+cumVar = cumsum(explained);
 
-% === (A) ANALYSE GLOBALE (toutes conditions) ============================
+yyaxis left
+bar(explained, 'FaceColor', [0.2 0.4 0.8]); hold on;
+ylabel('Variance expliquée (%)');
 
-% --- Biplot PC1-PC2 + cercle de corrélation
-fig_biplot = figure('Color','w');
-biplot(coeff(:,1:2), 'Scores', score(:,1:2), 'VarLabels', allVars);
-axis equal; hold on;
-theta = linspace(0,2*pi,100); plot(cos(theta), sin(theta), 'k--','LineWidth',1);
-title('ACP : PC1 & PC2 avec cercle de corrélation');
+yyaxis right
+plot(cumVar, '-o', 'Color', [0.8 0.2 0.2], 'LineWidth', 1.5);
+ylabel('Variance cumulée (%)');
+
+xlabel('Composantes principales (PC)');
+title('Variance expliquée et cumulée — ACP globale');
+grid on;
+
+% Ligne du seuil 70 %
+yline(70, '--k', '70%');
+
+exportgraphics(fig_var, fullfile(outdir, "01_VarianceExpliquee_GLOBAL_"+ts+".png"), 'Resolution',300);
+
+% === CERCLE DE CORRÉLATION (PC1-PC2) ===
+fig_corr = figure('Color','w'); hold on; axis equal;
+th = linspace(0, 2*pi, 100);
+plot(cos(th), sin(th), 'k--'); % cercle unité
 xlabel(sprintf('PC1 (%.1f%%)', explained(1)));
 ylabel(sprintf('PC2 (%.1f%%)', explained(2)));
+title('Cercle de corrélation (variables originales vs PC1-PC2)');
 grid on;
-exportgraphics(gca, fullfile(outdir, "01_Biplot_PC1_PC2_"+ts+".png"), 'Resolution',300);
 
-% --- Scatter PC1-PC2 : surfaces & tranches d'âge
-fig_scatter = figure('Color','w'); hold on;
-ageEdges = [0,72,144,216,inf];  % mois: 0-6, 6-12, 12-18, >18 ans
-ageLabelsAge = {'0-6 ans','6-12 ans','12-18 ans','>18 ans'};
-for iC = 1:numel(conds)
-    cond = conds{iC}; 
-    idxC = meta.Condition==cond;
-    for iA = 1:numel(ageLabelsAge)
-        idxA = meta.AgeMonths>ageEdges(iA) & meta.AgeMonths<=ageEdges(iA+1);
-        idx = idxC & idxA;
-        if any(idx)
-            scatter(score(idx,1), score(idx,2), 50, 'filled', ...
-                'DisplayName', sprintf('%s | %s', cond, ageLabelsAge{iA}));
-        end
+% Corrélations variables vs composantes
+corr_vars = corr(dataNorm, score(:,1:2));
+
+% Tracés des flèches
+for i = 1:size(corr_vars,1)
+    quiver(0,0, corr_vars(i,1), corr_vars(i,2), 0, 'LineWidth',1.2, 'MaxHeadSize',0.1);
+    % ici on peut afficher la version sans unités
+    text(corr_vars(i,1)*1.1, corr_vars(i,2)*1.1, allVars_disp{i}, ...
+        'FontSize',9,'Interpreter','none');
+end
+xlim([-1.1 1.1]); ylim([-1.1 1.1]);
+
+exportgraphics(fig_corr, fullfile(outdir, "02_CorrelationCircle_PC1PC2_"+ts+".png"), 'Resolution',300);
+
+
+% === CHOIX DU NOMBRE DE PC POUR LE CLUSTERING (>= 70% de variance) ===
+var_threshold = 70; %
+cumVar = cumsum(explained);
+nPC_final = find(cumVar >= var_threshold, 1, 'first');
+if isempty(nPC_final), nPC_final = min(3, size(score,2)); end
+nPC_final = max(2, nPC_final); % minimum 2 pour garder une structure
+fprintf('nPC_final choisi: %d PCs (variance cumulée = %.1f%%)\n', nPC_final, cumVar(nPC_final));
+
+% Pour la visualisation, on conserve PC1–PC2 ; pour le clustering, on utilise 1:nPC_final
+Xpcs_all_viz = score(:,1:2);
+Xpcs_all     = score(:,1:nPC_final);
+
+%% ========== (A) CLUSTERING PAR K-MEANS ANALYSE GLOBALE (toutes conditions) ==========
+rng(42);
+
+% --- Sélection robuste de k (vote multi-critères + bootstrap ARI) ---
+kRange = 2:10;
+[sil_vals,ch_vals,db_vals,gap_vals,gap_th] = criteria_curves(Xpcs_all,kRange);
+ari_mean = bootstrap_ari(Xpcs_all,kRange,100);
+
+sil_n = rescale(sil_vals,0,1);
+ch_n  = rescale(ch_vals ,0,1);
+db_n  = 1 - rescale(db_vals,0,1);
+gap_n = rescale(gap_vals,0,1);
+ari_n = rescale(ari_mean,0,1);
+score_global = 0.30*sil_n + 0.20*ch_n + 0.20*db_n + 0.10*gap_n + 0.20*ari_n;
+[~,best_idx] = max(score_global);
+k_global = kRange(best_idx);
+
+% --- Courbe du coude (WCSS) ---
+WCSS_vals = zeros(size(kRange));
+for kk = 1:numel(kRange)
+    k = kRange(kk);
+    [idx_tmp, Ctmp] = kmeans(Xpcs_all, k, ...
+        'Replicates', 20, 'MaxIter', 300, 'Display', 'off');
+
+    % distance de chaque point à SON centroïde
+    d2 = sum((Xpcs_all - Ctmp(idx_tmp, :)).^2, 2);  % n×1
+    WCSS_vals(kk) = sum(d2);
+end
+fig_elbow = figure('Color','w');
+plot(kRange, WCSS_vals, '-o', 'LineWidth',1.5);
+xlabel('Nombre de clusters (k)');
+ylabel('Somme des distances intra-clusters (WCSS)');
+title('Méthode du coude — Données globales');
+grid on;
+exportgraphics(fig_elbow, fullfile(outdir, "03a_ElbowPlot_GLOBAL_"+ts+".png"), 'Resolution',300);
+
+% Figures critères
+fig_kcrit = figure('Color','w');
+tiledlayout(3,2,'TileSpacing','compact','Padding','compact');
+nexttile; plot(kRange,sil_vals,'-o'); grid on; title('Silhouette ↑'); xlabel('k');
+nexttile; plot(kRange,ch_vals ,'-o'); grid on; title('Calinski–Harabasz ↑'); xlabel('k');
+nexttile; plot(kRange,db_vals ,'-o'); grid on; title('Davies–Bouldin ↓'); xlabel('k');
+nexttile; plot(kRange,gap_vals,'-o'); grid on; title('Gap ↑ (règle 1-SE)'); xlabel('k'); hold on; yline(gap_th,'k--','1-SE');
+nexttile; plot(kRange,ari_mean,'-o'); grid on; title('Stabilité (ARI) ↑'); xlabel('k');
+nexttile; plot(kRange,score_global,'-o'); hold on; plot(k_global, score_global(best_idx),'rp','MarkerFaceColor','r');
+grid on; title(sprintf('Score global ↑ (k*=%d)',k_global)); xlabel('k');
+exportgraphics(fig_kcrit, fullfile(outdir, "03b_Kselection_multiCriteria_GLOBAL_"+ts+".png"), 'Resolution',300);
+
+% === ÉVALUATION COMPARATIVE (k=2→10) — TABLEAU SYNTHÉTIQUE ===
+kRange_valid = 2:10;
+validity = table('Size',[numel(kRange_valid) 7], ...
+    'VariableNames', {'k','CH','Silhouette','DB','Gap','DNg','DNs'}, ...
+    'VariableTypes', {'double','double','double','double','double','double','double'});
+
+rng(42);
+for ii = 1:numel(kRange_valid)
+    k = kRange_valid(ii);
+    if size(Xpcs_all,1) < k, continue; end
+    idx = kmeans(Xpcs_all, k, 'Replicates',40,'MaxIter',400,'Display','off');
+    try SilMean = mean(silhouette(Xpcs_all, idx)); catch, SilMean = NaN; end
+    EC_ch  = evalclusters(Xpcs_all,'kmeans','CalinskiHarabasz','KList',k);
+    EC_db  = evalclusters(Xpcs_all,'kmeans','DaviesBouldin','KList',k);
+    EC_gap = evalclusters(Xpcs_all,'kmeans','gap','KList',k);
+
+    % Distances inter/intra
+    D = pdist2(Xpcs_all, Xpcs_all);
+    intra = mean(arrayfun(@(c) mean(D(idx==c,idx==c),'all','omitnan'), 1:k));
+    inter = mean(arrayfun(@(c) mean(D(idx==c,idx~=c),'all','omitnan'), 1:k));
+
+    validity(ii,:) = {k, EC_ch.CriterionValues, SilMean, EC_db.CriterionValues, EC_gap.CriterionValues, inter, intra};
+end
+
+disp('=== Pertinence des clusters (2→10) ===');
+disp(validity);
+
+% Export CSV uniquement
+out_csv = fullfile(outdir, "VALIDITY_INDEXES_GLOBAL_"+ts+".csv");
+writetable(validity, out_csv);
+fprintf('✅ Export CSV : %s\n', out_csv);
+
+% --- Clustering final (global) sur nPC_final ---
+[idxCluster_global, Cc_global_npc] = kmeans(Xpcs_all, k_global, ...
+    'Replicates',50,'MaxIter',500,'Display','off');
+Cc_global_pc12 = Cc_global_npc(:,1:2);  % centroïdes projetés sur PC1–PC2
+
+% === TRAÇABILITÉ DES INDIVIDUS PAR CLUSTER ===
+ClusterTrace = table();
+ClusterTrace.Participant = meta.Participant;
+ClusterTrace.Condition   = meta.Condition;
+ClusterTrace.AgeMonths   = meta.AgeMonths;
+ClusterTrace.AgeGroup    = meta.AgeGroup;
+ClusterTrace.Cluster     = idxCluster_global;
+ClusterTrace.PC1         = Xpcs_all_viz(:,1);
+ClusterTrace.PC2         = Xpcs_all_viz(:,2);
+
+% Tri par cluster
+ClusterTrace = sortrows(ClusterTrace, "Cluster");
+
+% Export CSV
+out_trace = fullfile(outdir, "06_ClusterTraceability_GLOBAL_"+ts+".csv");
+writetable(ClusterTrace, out_trace);
+fprintf('✅ Export traçabilité participants : %s\n', out_trace);
+
+% --- Scatter PC1–PC2 (viz) avec gradient d’âge + contours ---
+fig_agegrad = figure('Color','w'); hold on;
+scatter(Xpcs_all_viz(:,1), Xpcs_all_viz(:,2), 42, meta.AgeMonths/12, 'filled');
+colormap(parula); cb = colorbar; cb.Label.String = 'Âge (années)';
+xlabel(sprintf('PC1 (%.1f%%)', explained(1))); ylabel(sprintf('PC2 (%.1f%%)', explained(2)));
+title(sprintf('PC1–PC2 (viz). Clustering appris sur %d PC(s), k=%d', nPC_final, k_global)); grid on;
+
+cols = lines(k_global);
+for i=1:k_global
+    pts2 = Xpcs_all_viz(idxCluster_global==i,:);
+    if size(pts2,1) >= 3
+        K2 = convhull(pts2(:,1), pts2(:,2));
+        plot(pts2(K2,1), pts2(K2,2), '-', 'Color', cols(i,:), 'LineWidth',1.5);
     end
 end
-xlabel(sprintf('PC1 (%.1f%%)', explained(1)));
-ylabel(sprintf('PC2 (%.1f%%)', explained(2)));
-title('Observations : Surfaces & Tranches d age');
-legend('Location','bestoutside'); grid on;
-exportgraphics(gca, fullfile(outdir, "02_Scatter_PC1_PC2_AgeSurface_"+ts+".png"), 'Resolution',300);
-
-% --- Choix automatique de k : méthode du coude (global)
-kmax = 10; rng(42);
-sumd_global = elbow_sumd(score(:,1:2), kmax);
-[k_global, ~] = elbow_k(sumd_global);
-
-fig_elbow = figure('Color','w');
-plot(1:kmax, sumd_global, '-o', 'LineWidth',1.5); hold on;
-plot([1 kmax], [sumd_global(1) sumd_global(end)], 'k--');
-plot(k_global, sumd_global(k_global), 'rp', 'MarkerFaceColor','r', 'MarkerSize',12);
-xlabel('Nombre de clusters k'); ylabel('Somme des distances intra-cluster');
-title(sprintf('Méthode du coude — k* = %d (global)', k_global));
-grid on;
-exportgraphics(gca, fullfile(outdir, "03_Elbow_GLOBAL_"+ts+".png"), 'Resolution',300);
-
-% --- Clustering global
-[idxCluster_global, Cc_global] = kmeans(score(:,1:2), k_global, 'Replicates',20);
-
-% --- Visualisation clusters (global) + ANNOTATIONS ÂGE
-fig_clusters = figure('Color','w'); hold on;
-colorsK = lines(k_global);
-for i = 1:k_global
-    scatter(score(idxCluster_global==i,1), score(idxCluster_global==i,2), 60, colorsK(i,:), 'filled', ...
-        'DisplayName', sprintf('Cluster %d', i));
-end
-plot(Cc_global(:,1), Cc_global(:,2), 'kx', 'MarkerSize',15, 'LineWidth',2, 'DisplayName','Centres');
-xlabel(sprintf('PC1 (%.1f%%)', explained(1)));
-ylabel(sprintf('PC2 (%.1f%%)', explained(2)));
-title(sprintf('Clustering k-means (k=%d) sur PC1-PC2 — GLOBAL', k_global));
-grid on; legend('Location','bestoutside');
-
-% >>> Annotations âge moyen ± SD sur la figure globale
-AgeStats_global = annotate_age_on_clusters(gca, score(:,1:2), idxCluster_global, Cc_global, meta.AgeMonths);
-
-% --- Sauvegardes liées au global
-exportgraphics(gca, fullfile(outdir, "04_Clusters_GLOBAL_k"+k_global+"_"+ts+".png"), 'Resolution',300);
-
-% Profils moyens (z-score) par cluster (global)
-meanVars_global = array2table(zeros(k_global, numel(allVars)), 'VariableNames', allVars, ...
-    'RowNames', arrayfun(@(i)sprintf('Cluster_%d',i),1:k_global,'UniformOutput',false));
-for i = 1:k_global
-    meanVars_global{i, :} = mean(dataNorm(idxCluster_global==i, :), 1, 'omitnan');
+% === Centroïdes en petites croix + labels (tracés une seule fois) ===
+plot(Cc_global_pc12(:,1), Cc_global_pc12(:,2), 'kx', 'MarkerSize',12, 'LineWidth',2, 'DisplayName','Centroïdes');
+for i=1:k_global
+    text(Cc_global_pc12(i,1), Cc_global_pc12(i,2), sprintf('  C%d',i), ...
+        'FontWeight','bold','Color','k','VerticalAlignment','middle');
 end
 
-% === HEATMAPS ANALYSE GLOBALE ===
+% Annotations d'âge (utilise les centroïdes PC1–PC2)
+AgeStats_global = annotate_age_on_clusters(gca, Xpcs_all_viz, idxCluster_global, Cc_global_pc12, meta.AgeMonths);
+exportgraphics(fig_agegrad, fullfile(outdir,"04b_PC1PC2_AgeGradient_GLOBAL_k"+k_global+"_"+ts+".png"), 'Resolution',300);
 
-% --- Heatmap globale : profils moyens z-score par cluster ---
-fig_heatmap_global = figure('Color','w');
-fig_heatmap_global.Position = [100, 100, 1200, 600];
+% --- Profils moyens: z & unités réelles, Cohen's d, tests + FDR ---
+[meanZ_global, meanRAW_global, cohenD_global, statsTable_global] = ...
+    cluster_profiles_and_stats(dataMat, dataNorm, idxCluster_global, allVars);
 
-% Matrice des profils moyens (clusters x variables)
-heatmap_data_global = table2array(meanVars_global);
-
-% Créer la heatmap
-h_global = heatmap(allVars, meanVars_global.Properties.RowNames, heatmap_data_global, ...
-    'Title', sprintf('Profils moyens z-score par cluster (Global, k=%d)', k_global), ...
-    'XLabel', 'Variables spatio-temporelles', ...
-    'YLabel', 'Clusters', ...
-    'Colormap', blueyellow(256), ...
-    'ColorLimits', [-max(abs(heatmap_data_global(:))), max(abs(heatmap_data_global(:)))]);
-
-% Personnaliser l'affichage
-h_global.FontSize = 10;
-h_global.CellLabelFormat = '%.2f';
-h_global.GridVisible = 'on';
-
-% Augmenter la taille du titre
-try
-    h_global.Title.FontSize = 16;
-    h_global.Title.FontWeight = 'bold';
-catch
-    warning('Impossible de modifier la taille du titre');
-end
-
-% Rotation des étiquettes X pour meilleure lisibilité
-try
-    % Pour les versions récentes de MATLAB
-    h_global.XDisplayLabels = cellfun(@(x) strrep(x, ' ', {' '; ''}), allVars, 'UniformOutput', false);
-catch
-    % Méthode alternative si la propriété n'existe pas
-    warning('Impossible de modifier les étiquettes X de la heatmap');
-end
-
-% Sauvegarder
-exportgraphics(h_global, fullfile(outdir, "05_Heatmap_Profils_GLOBAL_k"+k_global+"_"+ts+".png"), 'Resolution',300);
-
-% --- Heatmap globale avec annotations statistiques ---
-fig_heatmap_stats_global = figure('Color','w');
-fig_heatmap_stats_global.Position = [100, 150, 1400, 700];
-
-% Créer une version annotée avec informations sur les clusters
-cluster_info_global = cell(k_global, 1);
-for i = 1:k_global
-    n_cluster = sum(idxCluster_global == i);
-    age_mean = AgeStats_global.AgeMonths_mean(i);
-    cluster_info_global{i} = sprintf('Cluster %d (n=%d, %.1f ans)', i, n_cluster, age_mean/12);
-end
-
-h_stats_global = heatmap(allVars, cluster_info_global, heatmap_data_global, ...
-    'Title', sprintf('Profils moyens z-score avec informations clusters (Global, k=%d)', k_global), ...
-    'XLabel', 'Variables spatio-temporelles', ...
-    'YLabel', 'Clusters (taille, âge moyen)', ...
-    'Colormap', blueyellow(256), ...
-    'ColorLimits', [-max(abs(heatmap_data_global(:))), max(abs(heatmap_data_global(:)))]);
-
-h_stats_global.FontSize = 9;
-h_stats_global.CellLabelFormat = '%.2f';
-h_stats_global.GridVisible = 'on';
-
-% Augmenter la taille du titre
-try
-    h_stats_global.Title.FontSize = 16;
-    h_stats_global.Title.FontWeight = 'bold';
-catch
-    warning('Impossible de modifier la taille du titre');
-end
-
-% Rotation des étiquettes X
-try
-    % Pour les versions récentes de MATLAB
-    h_stats_global.XDisplayLabels = cellfun(@(x) strrep(x, ' ', {' '; ''}), allVars, 'UniformOutput', false);
-catch
-    % Méthode alternative si la propriété n'existe pas
-    warning('Impossible de modifier les étiquettes X de la heatmap');
-end
-
-exportgraphics(h_stats_global, fullfile(outdir, "06_Heatmap_Profils_Stats_GLOBAL_k"+k_global+"_"+ts+".png"), 'Resolution',300);
-
-% CSV global
+% --- Sauvegardes GLOBAL ---
 writetable(AgeStats_global, fullfile(outdir, "Age_Stats_GLOBAL_"+ts+".csv"));
-writetable( addvars(meanVars_global,(1:k_global)','Before',1,'NewVariableNames','ClusterID'), ...
-            fullfile(outdir, "ProfilMoyen_zscore_GLOBAL_"+ts+".csv"), ...
-            'WriteRowNames', true, 'Delimiter',',');
-assignTable_global = table(meta.Participant, meta.Condition, meta.AgeMonths, meta.AgeGroup, ...
-                           score(:,1), score(:,2), idxCluster_global, ...
-    'VariableNames', {'Participant','Condition','AgeMonths','AgeGroup','PC1','PC2','Cluster'});
-writetable(assignTable_global, fullfile(outdir, "Assignations_PC12_GLOBAL_"+ts+".csv"));
-writetable(table((1:kmax)', sumd_global', 'VariableNames', {'k','SumIntraClusterDistances'}), ...
-           fullfile(outdir, "Elbow_GLOBAL_k_SumD_"+ts+".csv"));
-writetable(table((1:numel(explained))', explained, 'VariableNames', {'PC','ExplainedVariancePct'}), ...
-           fullfile(outdir, "ACP_ExplainedVariance_GLOBAL_"+ts+".csv"));
+writetable(addvars(meanZ_global,(1:k_global)','Before',1,'NewVariableNames','ClusterID'), ...
+           fullfile(outdir, "ProfilMoyen_zscore_GLOBAL_"+ts+".csv"), 'WriteRowNames',true);
+writetable(addvars(meanRAW_global,(1:k_global)','Before',1,'NewVariableNames','ClusterID'), ...
+           fullfile(outdir, "ProfilMoyen_unitesReelles_GLOBAL_"+ts+".csv"), 'WriteRowNames',true);
+writetable(addvars(cohenD_global,(1:k_global)','Before',1,'NewVariableNames','ClusterID'), ...
+           fullfile(outdir, "CohenD_GLOBAL_"+ts+".csv"), 'WriteRowNames',true);
+writetable(statsTable_global, fullfile(outdir,"Stats_omnibus_GLOBAL_"+ts+".csv"));
 
-% ===>>> AFFICHAGE CONSOLE — COMPOSITION DES CLUSTERS (GLOBAL) ------------
-fprintf('\n=== COMPOSITION DES CLUSTERS (GLOBAL) ===\n');
+% --- Heatmap z-score (UNE SEULE FIGURE, annotations intégrées) ---
+fig_heat = figure('Color','w');
+heatmap_data_global = table2array(meanZ_global);
+clim = max(abs(heatmap_data_global(:)));
+rowLabels = arrayfun(@(i) ...
+    sprintf('C%d (n=%d, %.1f ans)', i, sum(idxCluster_global==i), AgeStats_global.AgeMonths_mean(i)/12), ...
+    1:k_global, 'UniformOutput', false);
+
+h = heatmap(allVars_disp, rowLabels, heatmap_data_global, ...
+    'Title', sprintf('Profils moyens z-score — Global (k=%d, nPC=%d)', k_global, nPC_final), ...
+    'XLabel','Variables spatio-temporelles','YLabel','Clusters (taille, âge)', ...
+    'Colormap', blueyellow(256), 'ColorLimits', [-clim, clim]);
+h.FontSize = 10; h.CellLabelFormat = '%.2f'; h.GridVisible = 'on';
+exportgraphics(fig_heat, fullfile(outdir, "05_Heatmap_Profils_GLOBAL_k"+k_global+"_"+ts+".png"), 'Resolution',300);
+
+% --- Qualité & composition ---
+[sil_each, CH_best, DB_best, GAP_best, EntTable_global] = ...
+    quality_and_composition(Xpcs_all, idxCluster_global, meta, k_global, ch_vals, db_vals, gap_vals, kRange);
+writetable( table((1:numel(sil_each))', sil_each, idxCluster_global, ...
+    'VariableNames', {'Obs','Silhouette','Cluster'}) , ...
+    fullfile(outdir,"Silhouette_indiv_GLOBAL_"+ts+".csv") );
+writetable(EntTable_global, fullfile(outdir,"Qualite_Clusters_GLOBAL_"+ts+".csv"));
+fprintf('\n=== QUALITE (GLOBAL) ===\n');
+fprintf('nPC=%d | k*=%d | Sil=%.3f | CH=%.1f | DBI=%.3f | GAP=%.3f | ARI_boot=%.3f\n', ...
+    nPC_final, k_global, mean(sil_each,'omitnan'), CH_best, DB_best, GAP_best, ari_mean(kRange==k_global));
 print_cluster_composition(meta, idxCluster_global, conds);
 
-% === (B) ANALYSE PAR CONDITION avec HEATMAPS ===
-independentPCA = false;  % true = ACP recalculée par condition (pas comparables entre conditions)
+% === TESTS STATISTIQUES ENTRE CLUSTERS ===
+fprintf('\n=== Tests statistiques entre clusters (GLOBAL) ===\n');
+
+cluster_labels = unique(idxCluster_global);
+nClust = numel(cluster_labels);
+pvals = nan(1, numel(allVars));
+cohensD = nan(1, numel(allVars));
+testType = strings(numel(allVars),1);
+
+for v = 1:numel(allVars)
+    data1 = dataMat(idxCluster_global == cluster_labels(1), v);
+    data2 = dataMat(idxCluster_global == cluster_labels(2), v);
+
+    % Test de normalité
+    if all(~isnan(data1)) && all(~isnan(data2))
+        isNorm = all([kstest((data1-mean(data1))/std(data1)) == 0, ...
+                      kstest((data2-mean(data2))/std(data2)) == 0]);
+    else
+        isNorm = false;
+    end
+
+    % Test statistique
+    if isNorm
+        [~, p] = ttest2(data1, data2);
+        testType(v) = "t-test";
+    else
+        p = ranksum(data1, data2);
+        testType(v) = "Mann-Whitney";
+    end
+    pvals(v) = p;
+
+    % Taille d'effet (Cohen's d)
+    m1 = mean(data1, 'omitnan'); m2 = mean(data2, 'omitnan');
+    s1 = std(data1, 'omitnan'); s2 = std(data2, 'omitnan');
+    s_pooled = sqrt(((numel(data1)-1)*s1^2 + (numel(data2)-1)*s2^2) / ...
+                    (numel(data1)+numel(data2)-2));
+    cohensD(v) = (m1 - m2) / s_pooled;
+end
+
+% Correction Bonferroni
+nTests = numel(pvals);
+pvals_bonf = pvals * nTests;
+pvals_bonf(pvals_bonf > 1) = 1; % borne max à 1
+
+% Indicateurs de significativité
+Sig = repmat("ns", numel(pvals), 1);
+Sig(pvals_bonf < 0.05) = "*";
+Sig(pvals_bonf < 0.01) = "**";
+Sig(pvals_bonf < 0.001) = "***";
+
+% Résumé tableau avec Bonferroni + type de test
+StatsClusters = table(allVars_disp', testType, pvals', pvals_bonf', cohensD', Sig, ...
+    'VariableNames', {'Variable','Test','p_value','p_Bonferroni','Cohens_d','Sig'});
+disp(StatsClusters)
+
+% Export CSV
+writetable(StatsClusters, fullfile(outdir, "ClusterComparison_STATS_BONFERRONI_"+ts+".csv"));
+
+%% ========== (B) CLUSTERING PAR K-MEANS ANALYSES PAR CONDITION (Plat / Medium / High) ==========
+independentPCA = false;  % false = ACP commune (comparabilité), true = ACP par condition
 
 for iC = 1:numel(conds)
     cond = conds{iC};
     idxCond = meta.Condition==cond;
     nCond = sum(idxCond);
-    if nCond < 3
+    if nCond < 6
         warning('Condition %s: trop peu d''observations (%d). Clustering sauté.', cond, nCond);
         continue;
     end
 
     if independentPCA
-        % ACP propre à la condition
         Xnorm_c = dataNorm(idxCond, :);
-        [coeff_c, score_c, ~, ~, explained_c] = pca(Xnorm_c); %#ok<ASGLU>
-        pcs   = score_c(:,1:2);
+        [~, score_c, ~, ~, explained_c] = pca(Xnorm_c);
+        pcs_c_viz = score_c(:,1:2);              % viz
+        pcs_c     = score_c(:,1:min(nPC_final,size(score_c,2))); % clustering
         expl1 = explained_c(1); expl2 = explained_c(2);
     else
-        % Réutilise l'ACP globale
-        pcs   = score(idxCond,1:2);
+        pcs_c_viz = Xpcs_all_viz(idxCond,:);     % projection 2D commune
+        pcs_c     = Xpcs_all(idxCond,:);         % nPC_final commun
         expl1 = explained(1); expl2 = explained(2);
-        Xnorm_c = dataNorm(idxCond, :); % pour profils moyens
+        Xnorm_c = dataNorm(idxCond, :);
     end
+    meta_c = meta(idxCond,:);
 
-    % Coude conditionnel (k auto)
-    kmax_c = min(10, max(2, nCond-1));
-    sumd_c = elbow_sumd(pcs, kmax_c);
-    [k_c, ~] = elbow_k(sumd_c);
+    % === ÉVALUATION COMPARATIVE (k=2→10) — TABLEAU SYNTHÉTIQUE ===
+    kRange_valid_c = 2:min(10, max(2, nCond-1));
+    validity_c = table('Size',[numel(kRange_valid_c) 7], ...
+        'VariableNames', {'k','CH','Silhouette','DB','Gap','DNg','DNs'}, ...
+        'VariableTypes', {'double','double','double','double','double','double','double'});
 
-    % K-means sur la condition
-    [idxC, CcC] = kmeans(pcs, k_c, 'Replicates',20);
+    rng(42);
+    for jj = 1:numel(kRange_valid_c)
+        kk = kRange_valid_c(jj);
+        if size(pcs_c,1) < kk, continue; end
+        idx_tmp = kmeans(pcs_c, kk, 'Replicates',30,'MaxIter',400,'Display','off');
+        try SilMean_c = mean(silhouette(pcs_c, idx_tmp)); catch, SilMean_c = NaN; end
+        EC_ch_c  = evalclusters(pcs_c,'kmeans','CalinskiHarabasz','KList',kk);
+        EC_db_c  = evalclusters(pcs_c,'kmeans','DaviesBouldin','KList',kk);
+        EC_gap_c = evalclusters(pcs_c,'kmeans','gap','KList',kk);
+        % Distances inter/intra
+        D_c = pdist2(pcs_c, pcs_c);
+        intra_c = mean(arrayfun(@(cl) mean(D_c(idx_tmp==cl,idx_tmp==cl),'all','omitnan'), 1:kk));
+        inter_c = mean(arrayfun(@(cl) mean(D_c(idx_tmp==cl,idx_tmp~=cl),'all','omitnan'), 1:kk));
+        validity_c(jj,:) = {kk, EC_ch_c.CriterionValues, SilMean_c, EC_db_c.CriterionValues, EC_gap_c.CriterionValues, inter_c, intra_c};
+    end
+    writetable(validity_c, fullfile(outdir, "B0a_VALIDITY_INDEXES_"+cond+"_"+ts+".csv"));
 
-    % Figures — clusters (condition) + ANNOTATIONS ÂGE
+    % Sélection robuste de k (condition)
+    kRange_c = 2:min(10, max(2, nCond-1));
+    [sil_v_c,ch_v_c,db_v_c,gap_v_c,gap_th_c] = criteria_curves(pcs_c,kRange_c);
+    ari_mean_c = bootstrap_ari(pcs_c,kRange_c,80);
+
+    sil_n = rescale(sil_v_c,0,1);
+    ch_n  = rescale(ch_v_c ,0,1);
+    db_n  = 1 - rescale(db_v_c,0,1);
+    gap_n = rescale(gap_v_c,0,1);
+    ari_n = rescale(ari_mean_c,0,1);
+
+    score_c = 0.30*sil_n + 0.20*ch_n + 0.20*db_n + 0.10*gap_n + 0.20*ari_n;
+    [~,best_idx_c] = max(score_c);
+    k_c = kRange_c(best_idx_c);
+
+    % --- Courbe du coude (WCSS) --- (corrigée pour la condition)
+    WCSS_vals_c = zeros(size(kRange_c));
+    for kk = 1:numel(kRange_c)
+        ktest = kRange_c(kk);
+        [idx_tmp, Ctmp] = kmeans(pcs_c, ktest, ...
+            'Replicates', 20, 'MaxIter', 300, 'Display', 'off');
+        d2 = sum((pcs_c - Ctmp(idx_tmp, :)).^2, 2);
+        WCSS_vals_c(kk) = sum(d2);
+    end
+    fig_elbow_c = figure('Color','w');
+    plot(kRange_c, WCSS_vals_c, '-o', 'LineWidth',1.5);
+    xlabel('Nombre de clusters (k)');
+    ylabel('Somme des distances intra-clusters (WCSS)');
+    title(sprintf('Méthode du coude — %s', cond));
+    grid on;
+    exportgraphics(fig_elbow_c, fullfile(outdir, "B0_ElbowPlot_"+cond+"_"+ts+".png"), 'Resolution',300);
+
+    % Figures critères (condition)
+    fig_kcrit_c = figure('Color','w');
+    tiledlayout(3,2,'TileSpacing','compact','Padding','compact');
+    nexttile; plot(kRange_c,sil_v_c,'-o'); grid on; title(sprintf('%s: Silhouette ↑',cond)); xlabel('k');
+    nexttile; plot(kRange_c,ch_v_c ,'-o'); grid on; title(sprintf('%s: CH ↑',cond)); xlabel('k');
+    nexttile; plot(kRange_c,db_v_c ,'-o'); grid on; title(sprintf('%s: DBI ↓',cond)); xlabel('k');
+    nexttile; plot(kRange_c,gap_v_c,'-o'); grid on; title(sprintf('%s: Gap ↑ (1-SE)',cond)); xlabel('k'); hold on; yline(gap_th_c,'k--','1-SE');
+    nexttile; plot(kRange_c,ari_mean_c,'-o'); grid on; title(sprintf('%s: ARI ↑',cond)); xlabel('k');
+    nexttile; plot(kRange_c,score_c,'-o'); hold on; plot(k_c, score_c(best_idx_c),'rp','MarkerFaceColor','r');
+    grid on; title(sprintf('%s: Score global (k*=%d, nPC=%d)',cond,k_c,size(pcs_c,2))); xlabel('k');
+    exportgraphics(fig_kcrit_c, fullfile(outdir, "B0_Kselection_"+cond+"_"+ts+".png"), 'Resolution',300);
+
+    % Clustering final (condition)
+    [idxC, CcC_npc] = kmeans(pcs_c, k_c, 'Replicates',40,'MaxIter',400,'Display','off');
+    CcC_pc12 = CcC_npc(:,1:2);
+
+    % Scatter PC1–PC2 + gradient âge + contours
     figc = figure('Color','w'); hold on;
+    scatter(pcs_c_viz(:,1), pcs_c_viz(:,2), 42, meta_c.AgeMonths/12, 'filled');
+    colormap(parula); cb = colorbar; cb.Label.String = 'Âge (années)';
+    xlabel(sprintf('PC1 (%.1f%%)', expl1)); ylabel(sprintf('PC2 (%.1f%%)', expl2));
+    title(sprintf('%s — PC1–PC2 (viz). Clustering sur %d PC(s), k=%d', cond, size(pcs_c,2), k_c)); grid on;
+
     colsC = lines(k_c);
     for ic = 1:k_c
-        scatter(pcs(idxC==ic,1), pcs(idxC==ic,2), 60, colsC(ic,:), 'filled', ...
-            'DisplayName', sprintf('Cluster %d', ic));
+        pts = pcs_c_viz(idxC==ic,:);
+        if size(pts,1) >= 3
+            K = convhull(pts(:,1), pts(:,2));
+            plot(pts(K,1), pts(K,2), '-', 'Color', colsC(ic,:), 'LineWidth',1.5);
+        end
     end
-    plot(CcC(:,1), CcC(:,2), 'kx', 'MarkerSize',15, 'LineWidth',2, 'DisplayName','Centres');
-    xlabel(sprintf('PC1 (%.1f%%)', expl1));
-    ylabel(sprintf('PC2 (%.1f%%)', expl2));
-    title(sprintf('Clustering k-means — %s (k=%d)', cond, k_c));
-    grid on; legend('Location','bestoutside');
-
-    % >>> Annotations âge moyen ± SD sur la figure conditionnelle
-    meta_c = meta(idxCond,:);
-    AgeStats_c = annotate_age_on_clusters(gca, pcs, idxC, CcC, meta_c.AgeMonths);
-
-    % Export figure clusters
-    exportgraphics(gca, fullfile(outdir, "B1_Clusters_"+cond+"_k"+k_c+"_"+ts+".png"), 'Resolution',300);
-
-    % Figure — coude (condition)
-    fig_elb_c = figure('Color','w');
-    plot(1:kmax_c, sumd_c, '-o','LineWidth',1.5); hold on;
-    plot([1 kmax_c], [sumd_c(1) sumd_c(end)], 'k--');
-    plot(k_c, sumd_c(k_c), 'rp', 'MarkerFaceColor','r', 'MarkerSize',12);
-    xlabel('k'); ylabel('Somme des distances intra-cluster');
-    title(sprintf('Méthode du coude — %s (k*=%d)', cond, k_c));
-    grid on;
-    exportgraphics(gca, fullfile(outdir, "B0_Elbow_"+cond+"_"+ts+".png"), 'Resolution',300);
-
-    % Profils moyens (z-score) par cluster (condition)
-    meanVars_c = array2table(zeros(k_c, numel(allVars)), 'VariableNames', allVars, ...
-        'RowNames', arrayfun(@(i)sprintf('Cluster_%d',i),1:k_c,'UniformOutput',false));
-    for ic = 1:k_c
-        meanVars_c{ic, :} = mean(Xnorm_c(idxC==ic, :), 1, 'omitnan');
+    plot(CcC_pc12(:,1), CcC_pc12(:,2), 'kx', 'MarkerSize',12, 'LineWidth',2);
+    for ic=1:k_c
+        text(CcC_pc12(ic,1), CcC_pc12(ic,2), sprintf('  C%d',ic), ...
+            'FontWeight','bold','Color','k','VerticalAlignment','middle');
     end
 
-    % === HEATMAPS POUR CETTE CONDITION ===
-    
-    % --- Heatmap simple : profils moyens z-score par cluster ---
-    fig_heatmap_cond = figure('Color','w');
-    fig_heatmap_cond.Position = [100, 100, 1200, 400 + k_c*50];
-    
-    heatmap_data_c = table2array(meanVars_c);
-    
-    h_cond = heatmap(allVars, meanVars_c.Properties.RowNames, heatmap_data_c, ...
-        'Title', sprintf('Profils moyens z-score par cluster — %s (k=%d)', cond, k_c), ...
-        'XLabel', 'Variables spatio-temporelles', ...
-        'YLabel', 'Clusters', ...
-        'Colormap', blueyellow(256), ...
-        'ColorLimits', [-max(abs(heatmap_data_c(:))), max(abs(heatmap_data_c(:)))]);
-    
-    h_cond.FontSize = 10;
-    h_cond.CellLabelFormat = '%.2f';
-    h_cond.GridVisible = 'on';
-    
-    % Augmenter la taille du titre
-    try
-        h_cond.Title.FontSize = 16;
-        h_cond.Title.FontWeight = 'bold';
-    catch
-        warning('Impossible de modifier la taille du titre pour %s', cond);
-    end
-    
-    % Rotation des étiquettes X
-    try
-        % Pour les versions récentes de MATLAB
-        h_cond.XDisplayLabels = cellfun(@(x) strrep(x, ' ', {' '; ''}), allVars, 'UniformOutput', false);
-    catch
-        % Méthode alternative si la propriété n'existe pas
-        warning('Impossible de modifier les étiquettes X de la heatmap pour %s', cond);
-    end
-    
-    exportgraphics(h_cond, fullfile(outdir, "B2_Heatmap_Profils_"+cond+"_k"+k_c+"_"+ts+".png"), 'Resolution',300);
-    
-    % --- Heatmap avec annotations statistiques ---
-    fig_heatmap_stats_cond = figure('Color','w');
-    fig_heatmap_stats_cond.Position = [100, 150, 1400, 450 + k_c*50];
-    
-    cluster_info_c = cell(k_c, 1);
-    for ic = 1:k_c
-        n_cluster_c = sum(idxC == ic);
-        age_mean_c = AgeStats_c.AgeMonths_mean(ic);
-        cluster_info_c{ic} = sprintf('Cluster %d (n=%d, %.1f ans)', ic, n_cluster_c, age_mean_c/12);
-    end
-    
-    h_stats_cond = heatmap(allVars, cluster_info_c, heatmap_data_c, ...
-        'Title', sprintf('Profils moyens z-score avec infos clusters — %s (k=%d)', cond, k_c), ...
-        'XLabel', 'Variables spatio-temporelles', ...
-        'YLabel', 'Clusters (taille, âge moyen)', ...
-        'Colormap', blueyellow(256), ...
-        'ColorLimits', [-max(abs(heatmap_data_c(:))), max(abs(heatmap_data_c(:)))]);
-    
-    h_stats_cond.FontSize = 9;
-    h_stats_cond.CellLabelFormat = '%.2f';
-    h_stats_cond.GridVisible = 'on';
-    
-    % Augmenter la taille du titre
-    try
-        h_stats_cond.Title.FontSize = 16;
-        h_stats_cond.Title.FontWeight = 'bold';
-    catch
-        warning('Impossible de modifier la taille du titre pour %s', cond);
-    end
-    
-    % Rotation des étiquettes X
-    try
-        % Pour les versions récentes de MATLAB
-        h_stats_cond.XDisplayLabels = cellfun(@(x) strrep(x, ' ', {' '; ''}), allVars, 'UniformOutput', false);
-    catch
-        % Méthode alternative si la propriété n'existe pas
-        warning('Impossible de modifier les étiquettes X de la heatmap pour %s', cond);
-    end
-    
-    exportgraphics(h_stats_cond, fullfile(outdir, "B2b_Heatmap_Profils_Stats_"+cond+"_k"+k_c+"_"+ts+".png"), 'Resolution',300);
+    AgeStats_c = annotate_age_on_clusters(gca, pcs_c_viz, idxC, CcC_pc12, meta_c.AgeMonths);
+    exportgraphics(figc, fullfile(outdir, "B1_PC1PC2_AgeGradient_"+cond+"_k"+k_c+"_"+ts+".png"), 'Resolution',300);
 
-    % Sauvegardes CSV (condition)
-    writetable( addvars(meanVars_c,(1:k_c)','Before',1,'NewVariableNames','ClusterID'), ...
-                fullfile(outdir, "B3_ProfilMoyen_zscore_"+cond+"_"+ts+".csv"), ...
-                'WriteRowNames', true, 'Delimiter',',');
-    assignTable_c = table(meta_c.Participant, meta_c.AgeMonths, meta_c.AgeGroup, ...
-                          pcs(:,1), pcs(:,2), idxC, ...
-        'VariableNames', {'Participant','AgeMonths','AgeGroup','PC1','PC2','Cluster'});
-    writetable(assignTable_c, fullfile(outdir, "B4_Assignations_PC12_"+cond+"_"+ts+".csv"));
+    % Profils moyens, Cohen's d, tests omnibus
+    [meanZ_c, meanRAW_c, cohenD_c, statsTable_c] = ...
+        cluster_profiles_and_stats(dataMat(idxCond,:), Xnorm_c, idxC, allVars);
 
-    % ===>>> AFFICHAGE CONSOLE — COMPOSITION DES CLUSTERS (PAR CONDITION) ---
-    fprintf('\n=== COMPOSITION DES CLUSTERS — Condition %s ===\n', cond);
-    % Ici, on affiche uniquement la composition par groupe d'âge (la condition est fixe)
-    print_cluster_composition(meta_c, idxC, {cond});  % conds passé pour compatibilité
+    % === version affichage sans unités pour la condition ===
+    allVars_disp_c = allVars;
+    for i = 1:numel(allVars_disp_c)
+        if strcmp(allVars_disp_c{i}, 'CV_Gait speed (m.s^{-1})')
+            allVars_disp_c{i} = 'CV_Stride speed';
+            continue;
+        end
+        allVars_disp_c{i} = regexprep(allVars_disp_c{i}, '\s*\([^)]*\)', '');
+        allVars_disp_c{i} = strtrim(regexprep(allVars_disp_c{i}, '\s+', ' '));
+    end
+
+    % Heatmap z-score
+    fig_heat_c = figure('Color','w');
+    heatmap_data_c = table2array(meanZ_c);
+    clim_c = max(abs(heatmap_data_c(:)));
+    rowLabels_c = arrayfun(@(ic) ...
+        sprintf('C%d (n=%d, %.1f ans)', ic, sum(idxC==ic), AgeStats_c.AgeMonths_mean(ic)/12), ...
+        1:k_c, 'UniformOutput', false);
+    h_c = heatmap(allVars_disp_c, rowLabels_c, heatmap_data_c, ...
+        'Title', sprintf('Profils moyens z-score — %s (k=%d, nPC=%d)', cond, k_c, size(pcs_c,2)), ...
+        'XLabel','Variables spatio-temporelles','YLabel','Clusters (taille, âge)', ...
+        'Colormap', blueyellow(256), 'ColorLimits', [-clim_c, clim_c]);
+    h_c.FontSize = 10; h_c.CellLabelFormat = '%.2f'; h_c.GridVisible = 'on';
+    exportgraphics(fig_heat_c, fullfile(outdir, "B2_Heatmap_Profils_"+cond+"_k"+k_c+"_"+ts+".png"), 'Resolution',300);
+
+    % Qualité & composition
+    [sil_each_c, CH_best_c, DB_best_c, GAP_best_c, EntTable_c] = ...
+        quality_and_composition(pcs_c, idxC, meta_c, k_c, ch_v_c, db_v_c, gap_v_c, kRange_c);
+    writetable( table((1:numel(sil_each_c))', sil_each_c, idxC, ...
+        'VariableNames', {'Obs','Silhouette','Cluster'}) , ...
+        fullfile(outdir,"B3_Silhouette_indiv_"+cond+"_"+ts+".csv") );
+    writetable(EntTable_c, fullfile(outdir,"B4_Qualite_Clusters_"+cond+"_"+ts+".csv"));
+
+    % Exports CSV
+    writetable(AgeStats_c, fullfile(outdir, "B5_Age_Stats_"+cond+"_"+ts+".csv"));
+    writetable(addvars(meanZ_c,(1:k_c)','Before',1,'NewVariableNames','ClusterID'), ...
+        fullfile(outdir, "B6_ProfilMoyen_zscore_"+cond+"_"+ts+".csv"), 'WriteRowNames',true);
+    writetable(addvars(meanRAW_c,(1:k_c)','Before',1,'NewVariableNames','ClusterID'), ...
+        fullfile(outdir, "B7_ProfilMoyen_unitesReelles_"+cond+"_"+ts+".csv"), 'WriteRowNames',true);
+    writetable(addvars(cohenD_c,(1:k_c)','Before',1,'NewVariableNames','ClusterID'), ...
+        fullfile(outdir, "B8_CohenD_"+cond+"_"+ts+".csv"), 'WriteRowNames',true);
+    writetable(statsTable_c, fullfile(outdir,"B9_Stats_omnibus_"+cond+"_"+ts+".csv"));
+
+    % Tests statistiques entre clusters (seulement si k=2)
+    if k_c == 2
+        fprintf('\n=== Tests statistiques entre clusters — %s (k=2) ===\n', cond);
+        cLabs = unique(idxC);
+        pvals_c = nan(1, numel(allVars));
+        d_cohen_c = nan(1, numel(allVars));
+        testType_c = strings(numel(allVars),1);
+        for v = 1:numel(allVars)
+            x1 = dataMat(idxCond, v); x1 = x1(idxC == cLabs(1));
+            x2 = dataMat(idxCond, v); x2 = x2(idxC == cLabs(2));
+            ok1 = ~isnan(x1); ok2 = ~isnan(x2); x1 = x1(ok1); x2 = x2(ok2);
+            if numel(x1) >= 3 && numel(x2) >= 3
+                norm1 = (lillietest((x1-mean(x1))/std(x1)) == 0);
+                norm2 = (lillietest((x2-mean(x2))/std(x2)) == 0);
+                if norm1 && norm2
+                    [~, p] = ttest2(x1, x2);
+                    testType_c(v) = "t-test";
+                else
+                    p = ranksum(x1, x2);
+                    testType_c(v) = "Mann-Whitney";
+                end
+                pvals_c(v) = p;
+                m1 = mean(x1,'omitnan'); m2 = mean(x2,'omitnan');
+                s1 = std(x1,'omitnan'); s2 = std(x2,'omitnan');
+                sp = sqrt(((numel(x1)-1)*s1^2 + (numel(x2)-1)*s2^2) / (numel(x1)+numel(x2)-2));
+                d_cohen_c(v) = (m1 - m2) / max(sp, eps);
+            end
+        end
+        nT = sum(~isnan(pvals_c));
+        p_bonf_c = pvals_c * max(nT,1);
+        p_bonf_c(p_bonf_c > 1) = 1;
+        Sig_c = repmat("ns", numel(pvals_c), 1);
+        Sig_c(p_bonf_c < 0.05) = "*";
+        Sig_c(p_bonf_c < 0.01) = "**";
+        Sig_c(p_bonf_c < 0.001) = "***";
+        StatsClusters_c = table(allVars_disp_c', testType_c, pvals_c', p_bonf_c', d_cohen_c', Sig_c, ...
+            'VariableNames', {'Variable','Test','p_value','p_Bonferroni','Cohens_d','Sig'});
+        disp(StatsClusters_c);
+        writetable(StatsClusters_c, fullfile(outdir, "B9b_ClusterComparison_"+cond+"_BONFERRONI_"+ts+".csv"));
+    end
+
+    % Résumé console
+    fprintf('\n=== QUALITE — %s ===\n', cond);
+    fprintf('nPC=%d | k*=%d | Sil=%.3f | CH=%.1f | DBI=%.3f | GAP=%.3f | ARI_boot=%.3f\n', ...
+        size(pcs_c,2), k_c, mean(sil_each_c,'omitnan'), CH_best_c, DB_best_c, GAP_best_c, ari_mean_c(kRange_c==k_c));
+    print_cluster_composition(meta_c, idxC, {cond});
+
+    Trace_c = table(meta_c.Participant, meta_c.Condition, meta_c.AgeMonths, meta_c.AgeGroup, idxC, pcs_c_viz(:,1), pcs_c_viz(:,2), ...
+        'VariableNames', {'Participant','Condition','AgeMonths','AgeGroup','Cluster','PC1','PC2'});
+    writetable(Trace_c, fullfile(outdir, "B10_ClusterTraceability_"+cond+"_"+ts+".csv"));
 end
 
-% === HEATMAP COMPARATIVE GLOBALE ===
-fprintf('\n=== CRÉATION HEATMAP COMPARATIVE ===\n');
-
-% Concaténer tous les profils moyens
-all_profiles = [];
-all_labels = {};
-
-% Global d'abord
-all_profiles = [all_profiles; table2array(meanVars_global)];
-for i = 1:k_global
-    all_labels{end+1} = sprintf('Global-C%d (n=%d)', i, sum(idxCluster_global == i));
-end
-
-% Puis chaque condition
-for iC = 1:numel(conds)
-    cond = conds{iC};
-    idxCond = meta.Condition==cond;
-    nCond = sum(idxCond);
-    if nCond < 3, continue; end
-    
-    % Recalculer les données pour cette condition
-    if independentPCA
-        Xnorm_c = dataNorm(idxCond, :);
-        [~, score_c, ~, ~, ~] = pca(Xnorm_c);
-        pcs = score_c(:,1:2);
-    else
-        pcs = score(idxCond,1:2);
-        Xnorm_c = dataNorm(idxCond, :);
-    end
-    
-    kmax_c = min(10, max(2, nCond-1));
-    sumd_c = elbow_sumd(pcs, kmax_c);
-    [k_c, ~] = elbow_k(sumd_c);
-    [idxC, ~] = kmeans(pcs, k_c, 'Replicates',20);
-    
-    % Profils moyens
-    meanVars_c = zeros(k_c, numel(allVars));
-    for ic = 1:k_c
-        meanVars_c(ic, :) = mean(Xnorm_c(idxC==ic, :), 1, 'omitnan');
-        all_labels{end+1} = sprintf('%s-C%d (n=%d)', cond, ic, sum(idxC == ic));
-    end
-    all_profiles = [all_profiles; meanVars_c];
-end
-
-% Créer la heatmap comparative
-if ~isempty(all_profiles)
-    fig_comparative = figure('Color','w');
-    fig_comparative.Position = [100, 50, 1600, 300 + size(all_profiles,1)*30];
-    
-    h_comp = heatmap(allVars, all_labels, all_profiles, ...
-        'Title', 'Comparaison des profils moyens z-score - Toutes conditions', ...
-        'XLabel', 'Variables spatio-temporelles', ...
-        'YLabel', 'Clusters par condition', ...
-        'Colormap', blueyellow(256), ...
-        'ColorLimits', [-max(abs(all_profiles(:))), max(abs(all_profiles(:)))]);
-    
-    h_comp.FontSize = 8;
-    h_comp.CellLabelFormat = '%.2f';
-    h_comp.GridVisible = 'on';
-    
-    % Augmenter la taille du titre
-    try
-        h_comp.Title.FontSize = 16;
-        h_comp.Title.FontWeight = 'bold';
-    catch
-        warning('Impossible de modifier la taille du titre comparative');
-    end
-    
-    % Rotation des étiquettes X
-    try
-        % Pour les versions récentes de MATLAB
-        h_comp.XDisplayLabels = cellfun(@(x) strrep(x, ' ', {' '; ''}), allVars, 'UniformOutput', false);
-    catch
-        % Méthode alternative si la propriété n'existe pas
-        warning('Impossible de modifier les étiquettes X de la heatmap comparative');
-    end
-    
-    exportgraphics(h_comp, fullfile(outdir, "07_Heatmap_Comparative_ALL_"+ts+".png"), 'Resolution',300);
-    
-    % Sauvegarder les données comparatives
-    comp_table = array2table(all_profiles, 'VariableNames', allVars, 'RowNames', all_labels);
-    writetable(addvars(comp_table, (1:size(all_profiles,1))', 'Before', 1, 'NewVariableNames', 'ProfileID'), ...
-               fullfile(outdir, "08_Comparative_Profiles_"+ts+".csv"), ...
-               'WriteRowNames', true);
-end
-
-disp("✅ Clustering global + par condition + heatmaps sauvegardés dans : " + outdir);
+disp("✅ Analyses GLOBAL + PAR CONDITION terminées. Exports : " + outdir);
 
 %% ===================== FONCTIONS LOCALES =====================
 
-function sumd = elbow_sumd(pcs, kmax)
-% Retourne la somme des distances intra-cluster pour k=1..kmax
-kmax = max(1, kmax);
-sumd = zeros(1,kmax);
-rng(42);
-for ktest = 1:kmax
-    if size(pcs,1) >= ktest
-        [~,~, dist] = kmeans(pcs, ktest, 'Replicates',10, 'Display','off');
-        sumd(ktest) = sum(dist);
-    else
-        sumd(ktest) = NaN; % pas assez d'observations
-    end
-end
-% Remplace NaN par interpolation simple si besoin
-if any(isnan(sumd))
-    valid = ~isnan(sumd);
-    sumd(~valid) = interp1(find(valid), sumd(valid), find(~valid), 'linear', 'extrap');
-end
-end
-
-function [k_auto, dist_line] = elbow_k(sumd)
-% Trouve le "coude" via distance max à la corde
-x = 1:numel(sumd); y = sumd(:)';
-p1 = [x(1) y(1)]; p2 = [x(end) y(end)];
-num = abs((p2(2)-p1(2))*x - (p2(1)-p1(1))*y + p2(1)*p1(2) - p2(2)*p1(1));
-den = sqrt( (p2(2)-p1(2))^2 + (p2(1)-p1(1))^2 );
-dist_line = num ./ max(den, eps);
-[~, k_auto_rel] = max(dist_line(2:end-1));
-k_auto = k_auto_rel + 1;
-k_auto = max(2, k_auto); % évite k=1 par défaut
-end
-
-function AgeStats = annotate_age_on_clusters(ax, pcs, idxCluster, Cc, agesMonths)
-% Affiche pour chaque cluster : "μ ± σ ans" près du centroïde, avec halo.
-% Retourne aussi un tableau AgeStats (Cluster, N, AgeMonths_mean, AgeMonths_sd, AgeYears_label)
-k = size(Cc,1);
-AgeStats = table('Size',[k 5], ...
-    'VariableTypes', {'double','double','double','double','string'}, ...
-    'VariableNames', {'Cluster','N','AgeMonths_mean','AgeMonths_sd','AgeYears_label'});
-AgeStats.Cluster = (1:k)';
-
-hold(ax, 'on');
-dx = 0.12; dy = 0.12;   % petit décalage
-halo = 0.05;            % rayon du halo
-
-for i = 1:k
-    idx = (idxCluster == i);
-    ages_m = agesMonths(idx);
-    n_i  = numel(ages_m);
-    mu_m = mean(ages_m, 'omitnan');
-    sd_m = std(ages_m, 'omitnan');
-
-    AgeStats.N(i)              = n_i;
-    AgeStats.AgeMonths_mean(i) = mu_m;
-    AgeStats.AgeMonths_sd(i)   = sd_m;
-
-    mu_y = mu_m/12; sd_y = sd_m/12;
-    lbl = sprintf('%.1f \xB1 %.1f ans', mu_y, sd_y); % \xB1 = ±
-    AgeStats.AgeYears_label(i) = lbl;
-
-    if all(isfinite(Cc(i,:)))
-        x = Cc(i,1) + dx;
-        y = Cc(i,2) + dy;
-        txt = "\leftarrow " + string(lbl);
-
-        % Halo blanc (8 copies autour)
-        for ang = linspace(0, 2*pi, 8)
-            text(ax, x + halo*cos(ang), y + halo*sin(ang), txt, ...
-                'HorizontalAlignment','left','VerticalAlignment','bottom', ...
-                'FontSize',12,'FontWeight','bold','Color','w','Clipping','on');
-        end
-        % Texte principal
-        text(ax, x, y, txt, ...
-            'HorizontalAlignment','left','VerticalAlignment','bottom', ...
-            'FontSize',12,'FontWeight','bold','Color','k','Clipping','on');
-    end
-end
-end
-
 function grp = age_group_from_months(m)
-% Retourne la catégorie d'âge en fonction de l'âge en mois.
-% Bornes utilisées : <72 = JeunesEnfants ; 72-144 = Enfants ;
-% 144-216 = Adolescents ; >216 = Adultes
 if isnan(m)
     grp = "NA";
 elseif m <= 72
@@ -582,39 +656,206 @@ else
 end
 end
 
-function print_cluster_composition(meta_tbl, idxCluster, cond_list)
-% Affiche dans la console, pour chaque cluster :
-% - Nombre d'observations par groupe d'âge
-% - (Si plusieurs conditions dans meta_tbl) nb de conditions distinctes + répartition par condition
+function [sil_vals,ch_vals,db_vals,gap_vals,gap_th] = criteria_curves(X,kRange)
+sil_vals = zeros(numel(kRange),1);
+ch_vals  = zeros(numel(kRange),1);
+db_vals  = zeros(numel(kRange),1);
+gap_vals = zeros(numel(kRange),1);
+for ii = 1:numel(kRange)
+    k = kRange(ii);
+    idx_tmp = kmeans(X,k,'Replicates',10,'MaxIter',300,'Display','off');
+    try
+        sil_vals(ii) = mean(silhouette(X, idx_tmp, 'sqeuclidean'));
+    catch
+        sil_vals(ii) = NaN;
+    end
+    EC_ch  = evalclusters(X,'kmeans','CalinskiHarabasz','KList',k);
+    EC_db  = evalclusters(X,'kmeans','DaviesBouldin'   ,'KList',k);
+    EC_gap = evalclusters(X,'kmeans','gap'              ,'KList',k);
+    ch_vals(ii)  = EC_ch.CriterionValues;
+    db_vals(ii)  = EC_db.CriterionValues;
+    gap_vals(ii) = EC_gap.CriterionValues;
+end
+gap_se = std(gap_vals,'omitnan');
+gap_th = max(gap_vals,[],'omitnan') - gap_se;
+end
 
+function ari_mean = bootstrap_ari(X,kRange,B)
+ari_mean = zeros(numel(kRange),1);
+for ii=1:numel(kRange)
+    k = kRange(ii);
+    idx_ref = kmeans(X,k,'Replicates',50,'MaxIter',500,'Display','off');
+    ARI = zeros(B,1);
+    for b=1:B
+        boot_idx = randsample(size(X,1), size(X,1), true);
+        Xb = X(boot_idx,:);
+        idx_b = kmeans(Xb,k,'Replicates',20,'MaxIter',300,'Display','off');
+        ARI(b) = adjustedRandIndex(idx_ref(boot_idx), idx_b);
+    end
+    ari_mean(ii) = mean(ARI,'omitnan');
+end
+end
+
+function [meanZ, meanRAW, cohenD, statsTable] = cluster_profiles_and_stats(dataRAW, dataZ, idx, allVars)
+k = max(idx);
+meanZ = array2table(zeros(k,numel(allVars)),'VariableNames',allVars,...
+    'RowNames', "Cluster_"+string(1:k));
+for i=1:k
+    meanZ{i,:} = mean(dataZ(idx==i,:),1,'omitnan');
+end
+mu = mean(dataRAW,1,'omitnan'); sd = std(dataRAW,0,1,'omitnan');
+meanRAW = meanZ;
+for v=1:numel(allVars)
+    meanRAW{:,v} = meanZ{:,v}.*sd(v) + mu(v);
+end
+cohenD = array2table(zeros(k,numel(allVars)),'VariableNames',allVars,...
+    'RowNames', "Cluster_"+string(1:k));
+for i=1;k
+    Xc = dataRAW(idx==i,:);
+    for v=1:numel(allVars)
+        cohenD{i,v} = (mean(Xc(:,v),'omitnan') - mu(v)) / (sd(v)+eps);
+    end
+end
+pvals = nan(1,numel(allVars));
+for v=1:numel(allVars)
+    y = dataRAW(:,v); g = idx;
+    ok = ~isnan(y) & ~isnan(g);
+    y = y(ok); g = g(ok);
+    if numel(y) > 5 && numel(unique(g)) > 1
+        ystd = (y - mean(y,'omitnan'))./std(y,[],'omitnan');
+        try normok = (lillietest(ystd) == 0); catch, normok = false; end
+        if normok
+            pvals(v) = anova1(y,g,'off');
+        else
+            pvals(v) = kruskalwallis(y,g,'off');
+        end
+    end
+end
+[~,~,~,qvals] = fdr_bh(pvals, 0.05);
+statsTable = table(allVars(:), pvals(:), qvals(:), ...
+    'VariableNames', {'Variable','p_omnibus','q_FDR'});
+end
+
+function [sil_each, CH_best, DB_best, GAP_best, EntTable] = quality_and_composition(Xpcs, idx, meta_tbl, k, ch_vals, db_vals, gap_vals, kRange)
+try
+    sil_each = silhouette(Xpcs, idx);
+catch
+    sil_each = nan(size(idx));
+end
+CH_best  = ch_vals( kRange==k );
+DB_best  = db_vals( kRange==k );
+GAP_best = gap_vals(kRange==k );
+
+ageCats = ["JeunesEnfants","Enfants","Adolescents","Adultes"];
+ent_age = zeros(k,1);
+ent_surf= zeros(k,1);
+for c=1:k
+    sub = meta_tbl(idx==c,:);
+    countsA = arrayfun(@(a) sum(sub.AgeGroup==a), ageCats);
+    pA = countsA/sum(countsA); pA = pA(pA>0);
+    ent_age(c) = -sum(pA.*log2(pA));
+    catsS = categorical(sub.Condition);
+    countsS = countcats(catsS);
+    pS = countsS/sum(countsS); pS = pS(pS>0);
+    ent_surf(c) = -sum(pS.*log2(pS));
+end
+sil_byC = splitapply(@(x) mean(x,'omitnan'), sil_each, findgroups(idx));
+EntTable = table((1:k)', sil_byC, ent_age, ent_surf, ...
+    'VariableNames', {'Cluster','SilhouetteMean','EntropyAge','EntropySurface'});
+end
+
+function ARI = adjustedRandIndex(labelsTrue, labelsPred)
+labelsTrue = labelsTrue(:); labelsPred = labelsPred(:);
+n = numel(labelsTrue);
+[~,~,l1] = unique(labelsTrue);
+[~,~,l2] = unique(labelsPred);
+k1 = max(l1); k2 = max(l2);
+N = accumarray([l1 l2],1,[k1 k2]);
+ni = sum(N,2); nj = sum(N,1);
+sumComb = @(x) sum(x.*(x-1)/2);
+t1 = sumComb(N(:));
+t2 = sumComb(ni);
+t3 = sumComb(nj);
+t4 = n*(n-1)/2;
+exp_index = (t2*t3)/t4;
+max_index = (t2 + t3)/2;
+ARI = (t1 - exp_index) / (max_index - exp_index + eps);
+end
+
+function [h, crit_p, adj_p, q] = fdr_bh(pvals,qlevel)
+if nargin<2, qlevel = 0.05; end
+p = pvals(:);
+[ps, idx] = sort(p);
+m = numel(p);
+thresh = (1:m)'/m*qlevel;
+is_sig = ps <= thresh;
+k = find(is_sig,1,'last');
+h = false(size(p));
+if ~isempty(k), h(idx(1:k)) = true; end
+if ~isempty(k), crit_p = ps(k); else, crit_p = NaN; end
+adj_p = nan(size(p));
+adj_p(idx) = ps .* m ./ (1:m)';
+q = adj_p;
+end
+
+function AgeStats = annotate_age_on_clusters(ax, pcs, idxCluster, Cc, agesMonths)
+k = size(Cc,1);
+AgeStats = table('Size',[k 5], ...
+    'VariableTypes', {'double','double','double','double','string'}, ...
+    'VariableNames', {'Cluster','N','AgeMonths_mean','AgeMonths_sd','AgeYears_label'});
+AgeStats.Cluster = (1:k)';
+
+hold(ax, 'on');
+dx = 0.12; dy = 0.12; halo = 0.05;
+
+for i = 1:k
+    idx = (idxCluster == i);
+    ages_m = agesMonths(idx);
+    n_i  = numel(ages_m);
+    mu_m = mean(ages_m, 'omitnan');
+    sd_m = std(ages_m, 'omitnan');
+
+    AgeStats.N(i)              = n_i;
+    AgeStats.AgeMonths_mean(i) = mu_m;
+    AgeStats.AgeMonths_sd(i)   = sd_m;
+
+    mu_y = mu_m/12; sd_y = sd_m/12;
+    lbl = sprintf('%.1f %s %.1f ans', mu_y, char(177), sd_y);
+
+    if all(isfinite(Cc(i,:)))
+        x = Cc(i,1) + dx; y = Cc(i,2) + dy; txt = "← " + string(lbl);
+        for ang = linspace(0, 2*pi, 8)
+            text(ax, x + halo*cos(ang), y + halo*sin(ang), txt, ...
+                'HorizontalAlignment','left','VerticalAlignment','bottom', ...
+                'FontSize',12,'FontWeight','bold','Color','w','Clipping','on');
+        end
+        text(ax, x, y, txt, 'HorizontalAlignment','left','VerticalAlignment','bottom', ...
+            'FontSize',12,'FontWeight','bold','Color','k','Clipping','on');
+    end
+end
+end
+
+function print_cluster_composition(meta_tbl, idxCluster, varargin)
 clusters = unique(idxCluster(:))';
 ageCats = ["JeunesEnfants","Enfants","Adolescents","Adultes"];
-
 hasMultipleConds = numel(unique(meta_tbl.Condition)) > 1;
 
 for c = clusters
     idx = (idxCluster == c);
     sub = meta_tbl(idx, :);
-
-    % Comptage par groupe d'âge
     countsAge = zeros(size(ageCats));
     for a = 1:numel(ageCats)
         countsAge(a) = sum(sub.AgeGroup == ageCats(a));
     end
-
     fprintf('Cluster %d:\n', c);
     fprintf('  Par groupe d''âge : ');
     for a = 1:numel(ageCats)
         fprintf('%s=%d%s', ageCats(a), countsAge(a), iff(a<numel(ageCats), ', ', ''));
     end
     fprintf('\n');
-
-    % Conditions
     if hasMultipleConds
         [uConds, ~, ic] = unique(sub.Condition);
-        nDistinct = numel(uConds);
-        fprintf('  Conditions représentées : %d (', nDistinct);
-        % breakdown
+        fprintf('  Conditions représentées : %d (', numel(uConds));
         for k = 1:numel(uConds)
             cnt = sum(ic==k);
             fprintf('%s=%d%s', uConds(k), cnt, iff(k<numel(uConds), ', ', ''));
@@ -625,25 +866,12 @@ end
 end
 
 function s = iff(cond, a, b)
-% petit utilitaire inline if
 if cond, s = a; else, s = b; end
 end
 
 function cmap = blueyellow(n)
-% Crée une colormap bleu-blanc-jaune centrée sur 0
 if nargin < 1, n = 256; end
-
-% Créer le dégradé : Bleu foncé -> Blanc -> Jaune
-% Première moitié : Bleu vers blanc
-r1 = linspace(0, 1, n/2)';      % Rouge: de 0 à 1
-g1 = linspace(0, 1, n/2)';      % Vert: de 0 à 1  
-b1 = ones(n/2, 1);              % Bleu: reste à 1
-
-% Deuxième moitié : Blanc vers jaune
-r2 = ones(n/2, 1);              % Rouge: reste à 1
-g2 = ones(n/2, 1);              % Vert: reste à 1
-b2 = linspace(1, 0, n/2)';      % Bleu: de 1 à 0
-
-% Assembler la colormap complète
+r1 = linspace(0, 1, n/2)'; g1 = linspace(0, 1, n/2)'; b1 = ones(n/2, 1);
+r2 = ones(n/2, 1); g2 = ones(n/2, 1); b2 = linspace(1, 0, n/2)';
 cmap = [r1, g1, b1; r2, g2, b2];
 end

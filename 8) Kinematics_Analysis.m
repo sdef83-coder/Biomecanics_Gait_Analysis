@@ -270,7 +270,7 @@ end
 disp(['Nombre de participants: ' num2str(length(Participant))]);
 disp(['Toutes les figures et matrices ont été sauvegardées dans: ' save_path]);
 
-%% FIGURES UNIQUEMENT : Effet de l'âge & Effet de la surface (sans SPM) + bandes d'écart-type
+%% FIGURES UNIQUEMENT : Effet de l'âge & Effet de la surface + bandes d'écart-type
 % À coller à la place de toute la section "%% ANALYSE SPM : ..." (on ne fait plus de SPM)
 
 clc;

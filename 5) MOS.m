@@ -9,10 +9,10 @@ addpath(genpath('C:\Users\silve\OneDrive - Universite de Montreal\Silvere De Fre
 addpath(genpath('C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\functions'));
 
 %% === PARAMÈTRES À MODIFIER ===
-sujet_id = 'CTL_32';                              % ID du sujet à traiter
+sujet_id = 'CTL_14';                              % ID du sujet à traiter
 surfaces = {'Plat', 'Medium', 'High'};            % Surfaces étudiées
-essais = 1:10;                                    % Numéros des essais
-base_dir = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\Data\adults';    % Dossier contenant les C3D
+essais = 1:4;                                    % Numéros des essais
+base_dir = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\Data\jeunes_enfants';    % Dossier contenant les C3D
 output_file_csv = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\result\MoS\MoS.csv';
 output_file_mat = sprintf('C:\\Users\\silve\\Desktop\\DOCTORAT\\UNIV MONTREAL\\TRAVAUX-THESE\\Surfaces_Irregulieres\\Datas\\Script\\gaitAnalysisGUI\\result\\MoS\\MoS_results_%s.mat', sujet_id);
 
@@ -352,7 +352,7 @@ function mos = calculate_MoS(file_path, heel_strike_frame, heel_off_frame, toe_o
 % Filtrage Butterworth 6 Hz (zéro phase)
 fs = 100;              % <-- adapte/paramètre si nécessaire (FreqVicon)
 fc = 6;                % coupure à 6 Hz
-[b,a] = butter(4, fc/(fs/2), 'low');
+[b,a] = butter(2, fc/(fs/2), 'low');
 
 % Filtrer toutes les trajectoires présentes dans 'positions'
 fns = fieldnames(positions);
@@ -384,8 +384,8 @@ end
                   positions.LASI(:,3), positions.RASI(:,3)], 2);
     
     % Calcul des vitesses (en mm/s)
-    velocities_x = diff(COM_x) * 100;
-    velocities_y = diff(COM_y) * 100;
+    velocities_x = diff(COM_x) * fs; 
+    velocities_y = diff(COM_y) * fs;
     
     % Calcul de xCOM (centre de masse extrapolé)
     g = 9810;  % mm/s²
@@ -416,7 +416,7 @@ end
     M5_x = positions.(m5_marker_side)(:, 1);
     
     % Calcul MoS antéro-postérieur (AP)
-    if TOE_y(toe_off_frame) - HEEL_y(heel_strike_frame) > 0
+    if HEEL_y(toe_off_frame) - HEEL_y(heel_strike_frame) > 0
         directionAP = 1;
     else
         directionAP = -1;
@@ -499,7 +499,7 @@ if ~isfield(markers,'RM5') && isfield(markers,'RM51'); markers.RM5 = markers.RM5
 if ~isfield(markers,'LM5') && isfield(markers,'LM51'); markers.LM5 = markers.LM51; end
 
 % Filtrage doux pour COM (n'influence pas la détection HO)
-fc = 4;  [b,a] = butter(4, fc/(fs/2), 'low');
+fc = 6;  [b,a] = butter(2, fc/(fs/2), 'low');
 fn = fieldnames(markers);
 for k = 1:numel(fn)
     M = markers.(fn{k});

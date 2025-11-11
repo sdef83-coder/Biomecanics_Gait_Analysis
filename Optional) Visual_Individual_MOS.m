@@ -8,8 +8,8 @@ addpath(genpath('C:\Users\silve\OneDrive - Universite de Montreal\Silvere De Fre
 addpath(genpath('C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\functions'));
 
 %% === PARAMÈTRES ===
-sujet_id = 'CTL_46';
-base_dir = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\Data\enfants';
+sujet_id = 'CTL_15';
+base_dir = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\Data\jeunes_enfants';
 mat_file = sprintf('C:\\Users\\silve\\Desktop\\DOCTORAT\\UNIV MONTREAL\\TRAVAUX-THESE\\Surfaces_Irregulieres\\Datas\\Script\\gaitAnalysisGUI\\result\\MoS\\MoS_results_%s.mat', sujet_id);
 
 % Les 3 surfaces étudiées
@@ -47,10 +47,10 @@ fprintf('✅ Données chargées : %d cycles au total\n\n', height(results));
 fprintf('🔄 Extraction des courbes MoS complètes...\n');
 
 % Initialisation des structures pour stocker les courbes par surface
-mos_ap = cell(3, 1);     % en mm
-mos_ml = cell(3, 1);     % en mm
-mos_ap_P = cell(3, 1);   % en %L0
-mos_ml_P = cell(3, 1);   % en %L0
+mos_ap   = cell(3, 1);     % en mm
+mos_ml   = cell(3, 1);     % en mm
+mos_ap_P = cell(3, 1);     % en %L0
+mos_ml_P = cell(3, 1);     % en %L0
 
 for s = 1:length(surfaces)
     surf = surfaces{s};
@@ -80,17 +80,92 @@ for s = 1:length(surfaces)
         end
     end
     
-    mos_ap{s}  = mos_ap_temp;
-    mos_ml{s}  = mos_ml_temp;
-    mos_ap_P{s} = mos_apP_temp;
-    mos_ml_P{s} = mos_mlP_temp;
+    mos_ap{s}    = mos_ap_temp;
+    mos_ml{s}    = mos_ml_temp;
+    mos_ap_P{s}  = mos_apP_temp;
+    mos_ml_P{s}  = mos_mlP_temp;
     
     fprintf('   ✓ %d courbes extraites\n', size(mos_ap_temp, 1));
 end
 
 fprintf('\n✅ Extraction terminée\n\n');
 
+% axe normalisé (0-100 %) → on en aura besoin pour la structure
 x_norm = linspace(0, 100, n_points);
+
+%% === STRUCTURE COMPLÈTE DES CYCLES MoS (AP & ML, mm & %L0, toutes surfaces) ===
+MoS_store = struct();
+MoS_store.Sujet     = sujet_id;
+MoS_store.L0_mm     = L0_mm;
+MoS_store.n_points  = n_points;
+MoS_store.x_norm    = x_norm;
+MoS_store.Surfaces  = surfaces;
+
+for s = 1:length(surfaces)
+    surf = surfaces{s};
+
+    % on crée le sous-struct surface
+    MoS_store.(surf) = struct();
+
+    % ===================== AP =====================
+    % --- AP en mm ---
+    all_ap_mm = mos_ap{s};
+    MoS_store.(surf).AP.mm.all       = all_ap_mm;
+    MoS_store.(surf).AP.mm.n_cycles  = size(all_ap_mm, 1);
+    if ~isempty(all_ap_mm)
+        MoS_store.(surf).AP.mm.mean  = mean(all_ap_mm, 1);
+        MoS_store.(surf).AP.mm.std   = std (all_ap_mm, 0, 1);
+    else
+        MoS_store.(surf).AP.mm.mean  = [];
+        MoS_store.(surf).AP.mm.std   = [];
+    end
+
+    % --- AP en %L0 ---
+    all_ap_pL0 = mos_ap_P{s};
+    MoS_store.(surf).AP.pL0.all      = all_ap_pL0;
+    MoS_store.(surf).AP.pL0.n_cycles = size(all_ap_pL0, 1);
+    if ~isempty(all_ap_pL0)
+        MoS_store.(surf).AP.pL0.mean = mean(all_ap_pL0, 1);
+        MoS_store.(surf).AP.pL0.std  = std (all_ap_pL0, 0, 1);
+    else
+        MoS_store.(surf).AP.pL0.mean = [];
+        MoS_store.(surf).AP.pL0.std  = [];
+    end
+
+    % ===================== ML =====================
+    % --- ML en mm ---
+    all_ml_mm = mos_ml{s};
+    MoS_store.(surf).ML.mm.all       = all_ml_mm;
+    MoS_store.(surf).ML.mm.n_cycles  = size(all_ml_mm, 1);
+    if ~isempty(all_ml_mm)
+        MoS_store.(surf).ML.mm.mean  = mean(all_ml_mm, 1);
+        MoS_store.(surf).ML.mm.std   = std (all_ml_mm, 0, 1);
+    else
+        MoS_store.(surf).ML.mm.mean  = [];
+        MoS_store.(surf).ML.mm.std   = [];
+    end
+
+    % --- ML en %L0 ---
+    all_ml_pL0 = mos_ml_P{s};
+    MoS_store.(surf).ML.pL0.all      = all_ml_pL0;
+    MoS_store.(surf).ML.pL0.n_cycles = size(all_ml_pL0, 1);
+    if ~isempty(all_ml_pL0)
+        MoS_store.(surf).ML.pL0.mean = mean(all_ml_pL0, 1);
+        MoS_store.(surf).ML.pL0.std  = std (all_ml_pL0, 0, 1);
+    else
+        MoS_store.(surf).ML.pL0.mean = [];
+        MoS_store.(surf).ML.pL0.std  = [];
+    end
+end
+
+% === SAUVEGARDE ===
+save_dir_struct = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\result\MoS\Cycles';
+if ~exist(save_dir_struct, 'dir')
+    mkdir(save_dir_struct);
+end
+
+save(fullfile(save_dir_struct, sprintf('MoS_store_%s.mat', sujet_id)), 'MoS_store');
+fprintf('✅ Structure complète MoS sauvegardée pour %s\n', sujet_id);
 
 %% === VISUALISATION MoS ANTÉRO-POSTÉRIEUR (mm vs %L0) ===
 fprintf('📊 Création du graphique MoS AP (mm et %%L0)...\n');

@@ -1,6 +1,6 @@
 clc, clear, close all;
 
-cd('C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces Irrégulières\Datas\Script\gaitAnalysisGUI\result\matfiles\ALL')
+cd('C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\result\matfiles\ALL')
 
 load("l0_participants.mat", 'l0_map')
 
