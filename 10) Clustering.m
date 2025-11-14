@@ -133,6 +133,9 @@ meta.AgeGroup = string(meta.AgeGroup);
 dataNorm = zscore(dataMat);
 [coeff, score, ~, ~, explained] = pca(dataNorm);   % base commune
 
+% Nombre de PCs à afficher (par exemple les 10 premières ou toutes si moins)
+nPC_display = min(10, size(coeff, 2));
+
 % === COURBE DE VARIANCE EXPLIQUÉE ===
 fig_var = figure('Color','w');
 cumVar = cumsum(explained);
@@ -177,7 +180,6 @@ xlim([-1.1 1.1]); ylim([-1.1 1.1]);
 
 exportgraphics(fig_corr, fullfile(outdir, "02_CorrelationCircle_PC1PC2_"+ts+".png"), 'Resolution',300);
 
-
 % === CHOIX DU NOMBRE DE PC POUR LE CLUSTERING (>= 70% de variance) ===
 var_threshold = 70; %
 cumVar = cumsum(explained);
@@ -185,6 +187,63 @@ nPC_final = find(cumVar >= var_threshold, 1, 'first');
 if isempty(nPC_final), nPC_final = min(3, size(score,2)); end
 nPC_final = max(2, nPC_final); % minimum 2 pour garder une structure
 fprintf('nPC_final choisi: %d PCs (variance cumulée = %.1f%%)\n', nPC_final, cumVar(nPC_final));
+
+% === HEATMAP DES LOADINGS ===
+% Matrice des loadings (corrélations entre variables et PCs sélectionnées)
+loadings = corr(dataNorm, score(:, 1:nPC_final));
+
+fig_heatmap_loadings = figure('Color','w', 'Position', [100 100 1200 800]);
+h_load = heatmap(arrayfun(@(i) sprintf('PC%d (%.1f%%)', i, explained(i)), 1:nPC_final, 'UniformOutput', false), ...
+                 allVars_disp, loadings, ...
+                 'Title', sprintf('Loadings des variables sur les %d PCs sélectionnées (≥70%% variance)', nPC_final), ...
+                 'XLabel', 'Composantes principales', ...
+                 'YLabel', 'Variables spatio-temporelles', ...
+                 'Colormap', redblue(256), ...
+                 'ColorLimits', [-1, 1]);
+h_load.FontSize = 9;
+h_load.CellLabelFormat = '%.2f';
+h_load.GridVisible = 'on';
+
+exportgraphics(fig_heatmap_loadings, fullfile(outdir, "01b_Heatmap_Loadings_SelectedPCs_"+ts+".png"), 'Resolution',300);
+
+% === PAIR PLOTS DES PCs SELECTIONNEES ===
+nPC_pairplot = min(5, nPC_final);
+
+fig_pairplot = figure('Color','w', 'Position', [50 50 1400 1400]);
+
+% Créer une grille de subplots
+for i = 1:nPC_pairplot
+    for j = 1:nPC_pairplot
+        subplot(nPC_pairplot, nPC_pairplot, (i-1)*nPC_pairplot + j);
+        
+        if i == j
+            % Diagonale : histogramme de la PC
+            histogram(score(:,i), 30, 'FaceColor', [0.3 0.5 0.8], 'EdgeColor', 'none');
+            title(sprintf('PC%d (%.1f%%)', i, explained(i)), 'FontSize', 10);
+            ylabel('Fréquence');
+            grid on;
+        else
+            % Hors diagonale : scatter plot PC_j vs PC_i avec gradient d'âge
+            scatter(score(:,j), score(:,i), 25, meta.AgeMonths/12, 'filled', 'MarkerFaceAlpha', 0.6);
+            colormap(gca, parula);
+            xlabel(sprintf('PC%d (%.1f%%)', j, explained(j)), 'FontSize', 9);
+            ylabel(sprintf('PC%d (%.1f%%)', i, explained(i)), 'FontSize', 9);
+            grid on;
+            
+            % Colorbar seulement pour le dernier subplot de chaque ligne
+            if j == nPC_pairplot
+                cb = colorbar('eastoutside');
+                cb.Label.String = 'Âge (ans)';
+                cb.FontSize = 8;
+            end
+        end
+    end
+end
+
+sgtitle(sprintf('Pairplot des %d premières PCs avec gradient d''âge', nPC_pairplot), ...
+        'FontSize', 14, 'FontWeight', 'bold');
+
+exportgraphics(fig_pairplot, fullfile(outdir, "02b_Pairplot_PCs_AgeGradient_"+ts+".png"), 'Resolution',300);
 
 % Pour la visualisation, on conserve PC1–PC2 ; pour le clustering, on utilise 1:nPC_final
 Xpcs_all_viz = score(:,1:2);
@@ -293,31 +352,67 @@ out_trace = fullfile(outdir, "06_ClusterTraceability_GLOBAL_"+ts+".csv");
 writetable(ClusterTrace, out_trace);
 fprintf('✅ Export traçabilité participants : %s\n', out_trace);
 
-% --- Scatter PC1–PC2 (viz) avec gradient d’âge + contours ---
-fig_agegrad = figure('Color','w'); hold on;
-scatter(Xpcs_all_viz(:,1), Xpcs_all_viz(:,2), 42, meta.AgeMonths/12, 'filled');
-colormap(parula); cb = colorbar; cb.Label.String = 'Âge (années)';
-xlabel(sprintf('PC1 (%.1f%%)', explained(1))); ylabel(sprintf('PC2 (%.1f%%)', explained(2)));
-title(sprintf('PC1–PC2 (viz). Clustering appris sur %d PC(s), k=%d', nPC_final, k_global)); grid on;
+% Définir les markers par condition
+markerMap = containers.Map({'Plat', 'Medium', 'High'}, {'o', 's', '^'});
+markerSizes = 60; % Taille des markers
 
+fig_agegrad_shapes = figure('Color','w', 'Position', [100 100 1000 800]); 
+hold on;
+
+% Tracer chaque condition avec sa forme spécifique
+conds_unique = unique(meta.Condition);
+for iC = 1:numel(conds_unique)
+    cond = conds_unique(iC);
+    idx_cond = meta.Condition == cond;
+    
+    scatter(Xpcs_all_viz(idx_cond, 1), Xpcs_all_viz(idx_cond, 2), ...
+            markerSizes, meta.AgeMonths(idx_cond)/12, ...
+            'filled', markerMap(char(cond)), ...
+            'MarkerFaceAlpha', 0.7, ...
+            'DisplayName', char(cond));
+end
+
+colormap(parula); 
+cb = colorbar; 
+cb.Label.String = 'Âge (années)';
+cb.FontSize = 11;
+
+xlabel(sprintf('PC1 (%.1f%%)', explained(1)), 'FontSize', 12); 
+ylabel(sprintf('PC2 (%.1f%%)', explained(2)), 'FontSize', 12);
+title(sprintf('PC1–PC2 avec gradient d''âge et formes par surface\nClustering sur %d PC(s), k=%d', ...
+              nPC_final, k_global), 'FontSize', 13);
+grid on;
+
+% Tracer les contours des clusters
 cols = lines(k_global);
-for i=1:k_global
-    pts2 = Xpcs_all_viz(idxCluster_global==i,:);
+for i = 1:k_global
+    pts2 = Xpcs_all_viz(idxCluster_global==i, :);
     if size(pts2,1) >= 3
         K2 = convhull(pts2(:,1), pts2(:,2));
-        plot(pts2(K2,1), pts2(K2,2), '-', 'Color', cols(i,:), 'LineWidth',1.5);
+        plot(pts2(K2,1), pts2(K2,2), '-', 'Color', cols(i,:), ...
+             'LineWidth', 2, 'HandleVisibility', 'off');
     end
 end
-% === Centroïdes en petites croix + labels (tracés une seule fois) ===
-plot(Cc_global_pc12(:,1), Cc_global_pc12(:,2), 'kx', 'MarkerSize',12, 'LineWidth',2, 'DisplayName','Centroïdes');
-for i=1:k_global
-    text(Cc_global_pc12(i,1), Cc_global_pc12(i,2), sprintf('  C%d',i), ...
-        'FontWeight','bold','Color','k','VerticalAlignment','middle');
+
+% Centroïdes
+plot(Cc_global_pc12(:,1), Cc_global_pc12(:,2), 'kx', ...
+     'MarkerSize', 14, 'LineWidth', 3, 'DisplayName', 'Centroïdes');
+for i = 1:k_global
+    text(Cc_global_pc12(i,1), Cc_global_pc12(i,2), sprintf('  C%d', i), ...
+         'FontWeight', 'bold', 'Color', 'k', 'VerticalAlignment', 'middle', ...
+         'FontSize', 11);
 end
 
-% Annotations d'âge (utilise les centroïdes PC1–PC2)
-AgeStats_global = annotate_age_on_clusters(gca, Xpcs_all_viz, idxCluster_global, Cc_global_pc12, meta.AgeMonths);
-exportgraphics(fig_agegrad, fullfile(outdir,"04b_PC1PC2_AgeGradient_GLOBAL_k"+k_global+"_"+ts+".png"), 'Resolution',300);
+% Légende pour les surfaces
+legend('Location', 'best', 'FontSize', 10);
+
+% Annotations d'âge
+AgeStats_global = annotate_age_on_clusters(gca, Xpcs_all_viz, idxCluster_global, ...
+                                           Cc_global_pc12, meta.AgeMonths);
+
+exportgraphics(fig_agegrad_shapes, ...
+               fullfile(outdir, "04_PC1PC2_AgeGradient_Shapes_GLOBAL_k"+k_global+"_"+ts+".png"), ...
+               'Resolution', 300);
 
 % --- Profils moyens: z & unités réelles, Cohen's d, tests + FDR ---
 [meanZ_global, meanRAW_global, cohenD_global, statsTable_global] = ...
@@ -465,7 +560,7 @@ for iC = 1:numel(conds)
         inter_c = mean(arrayfun(@(cl) mean(D_c(idx_tmp==cl,idx_tmp~=cl),'all','omitnan'), 1:kk));
         validity_c(jj,:) = {kk, EC_ch_c.CriterionValues, SilMean_c, EC_db_c.CriterionValues, EC_gap_c.CriterionValues, inter_c, intra_c};
     end
-    writetable(validity_c, fullfile(outdir, "B0a_VALIDITY_INDEXES_"+cond+"_"+ts+".csv"));
+    writetable(validity_c, fullfile(outdir, "B00_VALIDITY_INDEXES_"+cond+"_"+ts+".csv"));
 
     % Sélection robuste de k (condition)
     kRange_c = 2:min(10, max(2, nCond-1));
@@ -497,7 +592,7 @@ for iC = 1:numel(conds)
     ylabel('Somme des distances intra-clusters (WCSS)');
     title(sprintf('Méthode du coude — %s', cond));
     grid on;
-    exportgraphics(fig_elbow_c, fullfile(outdir, "B0_ElbowPlot_"+cond+"_"+ts+".png"), 'Resolution',300);
+    exportgraphics(fig_elbow_c, fullfile(outdir, "B01_ElbowPlot_"+cond+"_"+ts+".png"), 'Resolution',300);
 
     % Figures critères (condition)
     fig_kcrit_c = figure('Color','w');
@@ -509,7 +604,7 @@ for iC = 1:numel(conds)
     nexttile; plot(kRange_c,ari_mean_c,'-o'); grid on; title(sprintf('%s: ARI ↑',cond)); xlabel('k');
     nexttile; plot(kRange_c,score_c,'-o'); hold on; plot(k_c, score_c(best_idx_c),'rp','MarkerFaceColor','r');
     grid on; title(sprintf('%s: Score global (k*=%d, nPC=%d)',cond,k_c,size(pcs_c,2))); xlabel('k');
-    exportgraphics(fig_kcrit_c, fullfile(outdir, "B0_Kselection_"+cond+"_"+ts+".png"), 'Resolution',300);
+    exportgraphics(fig_kcrit_c, fullfile(outdir, "B02_Kselection_"+cond+"_"+ts+".png"), 'Resolution',300);
 
     % Clustering final (condition)
     [idxC, CcC_npc] = kmeans(pcs_c, k_c, 'Replicates',40,'MaxIter',400,'Display','off');
@@ -537,7 +632,7 @@ for iC = 1:numel(conds)
     end
 
     AgeStats_c = annotate_age_on_clusters(gca, pcs_c_viz, idxC, CcC_pc12, meta_c.AgeMonths);
-    exportgraphics(figc, fullfile(outdir, "B1_PC1PC2_AgeGradient_"+cond+"_k"+k_c+"_"+ts+".png"), 'Resolution',300);
+    exportgraphics(figc, fullfile(outdir, "B03_PC1PC2_AgeGradient_"+cond+"_k"+k_c+"_"+ts+".png"), 'Resolution',300);
 
     % Profils moyens, Cohen's d, tests omnibus
     [meanZ_c, meanRAW_c, cohenD_c, statsTable_c] = ...
@@ -566,16 +661,16 @@ for iC = 1:numel(conds)
         'XLabel','Variables spatio-temporelles','YLabel','Clusters (taille, âge)', ...
         'Colormap', blueyellow(256), 'ColorLimits', [-clim_c, clim_c]);
     h_c.FontSize = 10; h_c.CellLabelFormat = '%.2f'; h_c.GridVisible = 'on';
-    exportgraphics(fig_heat_c, fullfile(outdir, "B2_Heatmap_Profils_"+cond+"_k"+k_c+"_"+ts+".png"), 'Resolution',300);
+    exportgraphics(fig_heat_c, fullfile(outdir, "B04_Heatmap_Profils_"+cond+"_k"+k_c+"_"+ts+".png"), 'Resolution',300);
 
     % Qualité & composition
     [sil_each_c, CH_best_c, DB_best_c, GAP_best_c, EntTable_c] = ...
         quality_and_composition(pcs_c, idxC, meta_c, k_c, ch_v_c, db_v_c, gap_v_c, kRange_c);
     writetable( table((1:numel(sil_each_c))', sil_each_c, idxC, ...
         'VariableNames', {'Obs','Silhouette','Cluster'}) , ...
-        fullfile(outdir,"B3_Silhouette_indiv_"+cond+"_"+ts+".csv") );
+        fullfile(outdir,"B05_Silhouette_indiv_"+cond+"_"+ts+".csv") );
     writetable(EntTable_c, fullfile(outdir,"B4_Qualite_Clusters_"+cond+"_"+ts+".csv"));
-
+    
     % Exports CSV
     writetable(AgeStats_c, fullfile(outdir, "B5_Age_Stats_"+cond+"_"+ts+".csv"));
     writetable(addvars(meanZ_c,(1:k_c)','Before',1,'NewVariableNames','ClusterID'), ...
@@ -874,4 +969,21 @@ if nargin < 1, n = 256; end
 r1 = linspace(0, 1, n/2)'; g1 = linspace(0, 1, n/2)'; b1 = ones(n/2, 1);
 r2 = ones(n/2, 1); g2 = ones(n/2, 1); b2 = linspace(1, 0, n/2)';
 cmap = [r1, g1, b1; r2, g2, b2];
+end
+
+function cmap = redblue(n)
+    % Colormap rouge-blanc-bleu pour loadings
+    if nargin < 1, n = 256; end
+    
+    % Rouge -> Blanc
+    r1 = ones(n/2, 1);
+    g1 = linspace(0, 1, n/2)';
+    b1 = linspace(0, 1, n/2)';
+    
+    % Blanc -> Bleu
+    r2 = linspace(1, 0, n/2)';
+    g2 = linspace(1, 0, n/2)';
+    b2 = ones(n/2, 1);
+    
+    cmap = [r1, g1, b1; r2, g2, b2];
 end
