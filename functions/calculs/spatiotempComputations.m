@@ -48,5 +48,40 @@ function results = spatiotempComputations(data, results)
         
         % Calcul de la cadence (pas/minute) de marche
         results.(side).vitCadencePasParMinute = 1./results.(side).tempsFoulee * 60; % Convertir en "pas/minutes" 
+
+        % Largeur de pas (mm) : Distance ML entre talons au contact 
+        framesContact = data.(side).stamps.([side '_Foot_Strike']).frameStamp;
+        framesContactOpp = data.(side).stamps.([oppositeSide '_Foot_Strike']).frameStamp;
+        
+        nStrides = length(framesContact) - 1; % Nombre de foulées
+        stepWidthHeel = zeros(nStrides, 1);
+        
+        for iStride = 1:nStrides
+            % Frame de contact du pied considéré
+            frameCurrentSide = framesContact(iStride);
+            frameNextSide = framesContact(iStride + 1);
+            
+            % Trouver le contact du pied opposé ENTRE ces deux contacts
+            idxOppBetween = find(framesContactOpp > frameCurrentSide & ...
+                                framesContactOpp < frameNextSide);
+            
+            if ~isempty(idxOppBetween)
+                % Prendre le premier contact opposé dans cet intervalle
+                frameOppSide = framesContactOpp(idxOppBetween(1));
+                
+                % Position ML (axe X) des talons
+                posML_CurrentSide = data.(side).markers.([s 'HEE'])(frameCurrentSide, 1); % en mm
+                posML_OppSide = data.(side).markers.([os 'HEE'])(frameOppSide, 1); % en mm
+                
+                % Distance ML = largeur de pas (en mm)
+                stepWidthHeel(iStride) = abs(posML_CurrentSide - posML_OppSide);
+            else
+                % Si pas de contact opposé trouvé, mettre NaN
+                stepWidthHeel(iStride) = NaN;
+            end
+        end
+        
+        % Stocker dans results (en mm pour cohérence avec autres mesures)
+        results.(side).stepWidthHeel = stepWidthHeel;
     end
 end
