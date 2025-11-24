@@ -136,14 +136,14 @@ function [stats] = Spatiotempocalc(Left, Right)
 
     % === Calcul du Walk Ratio par jambe (en cm/pas/min) ===
     % Gauche
-    leftStrideLength  = vertcat(Left.distPas);
+    leftStepLength    = vertcat(Left.distPas);
     leftCadence       = 2*vertcat(Left.vitCadencePasParMinute);
-    leftWalkRatio     = (leftStrideLength ./ leftCadence) * 100;  % en cm·min⁻¹·pas⁻¹
+    leftWalkRatio     = (leftStepLength * 100 ./ leftCadence);  % en cm·pas⁻¹.min⁻¹ (car distPas en mètre)
 
     % Droite
-    rightStrideLength = vertcat(Right.distPas);
+    rightStepLength   = vertcat(Right.distPas);
     rightCadence      = 2*vertcat(Right.vitCadencePasParMinute);
-    rightWalkRatio    = (rightStrideLength ./ rightCadence) * 100;  % en cm·min⁻¹·pas⁻¹
+    rightWalkRatio    = (rightStepLength * 100 ./ rightCadence);  % en cm·pas⁻¹.min⁻¹ (car distPas en mètre)
 
     % Moyennes
     stats.WalkRatio_Mean_Left = mean(leftWalkRatio, 'omitnan');
