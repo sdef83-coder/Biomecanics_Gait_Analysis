@@ -43,8 +43,8 @@ for p = 1:length(participants)
             N_right = length(c.resultsAll.kin.Right);
             for n = 1:N_right
                 distPasR = c.resultsAll.kin.Right(n).distPas;
-                cadenceR = c.resultsAll.kin.Right(n).vitCadencePasParMinute * 2; % x2 car ici cycle par minute et pas ppm
-                LargPasR = c.resultsAll.kin.Right(n).stepWidthHeel * 10; % x10 car ici la variable est en mm, on l'a met en cm
+                cadenceR = c.resultsAll.kin.Right(n).vitCadencePasParMinute * 2; % x2 car vitCadencePasParMinute = cycle/minute et non pas des ppm
+                LargPasR = c.resultsAll.kin.Right(n).stepWidthHeel / 10; % mm vers cm
                 WalkSpeedR = c.resultsAll.kin.Right(n).vitFoulee;
                 % (Hof et al., 1996) pour les méthodes de normalisation des variables
                 c.resultsAll.kin.Right(n).NormStepLength = distPasR / l0;
@@ -59,7 +59,7 @@ for p = 1:length(participants)
             for n = 1:N_left
                 distPasL = c.resultsAll.kin.Left(n).distPas;
                 cadenceL = c.resultsAll.kin.Left(n).vitCadencePasParMinute * 2;
-                LargPasL = c.resultsAll.kin.Left(n).stepWidthHeel * 10;
+                LargPasL = c.resultsAll.kin.Left(n).stepWidthHeel / 10;
                 WalkSpeedL = c.resultsAll.kin.Left(n).vitFoulee;
                 % (Hof et al., 1996) pour les méthodes de normalisation des variables
                 c.resultsAll.kin.Left(n).NormStepLength = distPasL / l0;
