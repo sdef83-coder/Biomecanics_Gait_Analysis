@@ -19,6 +19,7 @@ end
 % Décommentez SEULEMENT si je dois recréer le fichier complet ou modifier des valeurs existantes
 % l0_map('CTL_01') = 0.7325;
 % l0_map('CTL_02') = 0.6675;
+% l0_map('CTL_03') = 0.815 ;
 % l0_map('CTL_04') = 0.929;
 % l0_map('CTL_05') = 0.8825;
 % l0_map('CTL_06') = 0.711;
@@ -28,6 +29,7 @@ end
 % l0_map('CTL_10') = 0.80;
 % l0_map('CTL_11') = 0.8125;
 % l0_map('CTL_12') = 0.9505;
+% l0_map('CTL_13') = 0.90 ;
 % l0_map('CTL_14') = 0.475;
 % l0_map('CTL_15') = 0.455;
 % l0_map('CTL_16') = 0.555;
@@ -35,17 +37,24 @@ end
 % l0_map('CTL_18') = 0.985;
 % l0_map('CTL_19') = 0.5625;
 % l0_map('CTL_20') = 0.7375;
+% l0_map('CTL_22') = 0.9925;
 % l0_map('CTL_23') = 0.55;
 % l0_map('CTL_24') = 0.8825;
 % l0_map('CTL_25') = 0.8735;
 % l0_map('CTL_26') = 0.87;
 % l0_map('CTL_27') = 0.8665;
 % l0_map('CTL_28') = 0.9125;
+% l0_map('CTL_29') = 0.945;
+% l0_map('CTL_31') = 0.6175;
 % l0_map('CTL_32') = 0.931;
 % l0_map('CTL_34') = 0.793;
 % l0_map('CTL_35') = 0.84;
 % l0_map('CTL_37') = 0.5645;
+% l0_map('CTL_38') = 0.6565;
+% l0_map('CTL_39') = 0.623;
 % l0_map('CTL_40') = 0.54;
+% l0_map('CTL_44') = 0.6825;
+% l0_map('CTL_46') = 0.646;
 % l0_map('CTL_47') = 0.8925;
 % l0_map('CTL_48') = 0.924;
 % l0_map('CTL_50') = 0.9485 ;
@@ -54,24 +63,15 @@ end
 % l0_map('CTL_60') = 0.875 ;
 % l0_map('CTL_61') = 0.8045 ;
 % l0_map('CTL_62') = 0.9275 ;
-% l0_map('CTL_63') = 0.47 ;
+% l0_map('CTL_63') = 0.47;
+% l0_map('CTL_65') = 0.472;
 
 % === NOUVEAUX PARTICIPANTS (à ajouter) ===
 
-l0_map('CTL_03') = 0.815 ; % Nouveau participant - décommentez si besoin de rajouter un participant
-l0_map('CTL_13') = 0.90 ;
-l0_map('CTL_22') = 0.9925 ;
-l0_map('CTL_29') = 0.945 ;
-l0_map('CTL_31') = 0.6175 ;
-l0_map('CTL_38') = 0.6565 ;
-l0_map('CTL_39') = 0.623 ;
-l0_map('CTL_44') = 0.6825 ;
-l0_map('CTL_46') = 0.646 ;
-l0_map('CTL_65') = 0.472 ;
+l0_map('CTL_30') = 0.975 ; % Nouveau participant - décommentez si besoin de rajouter un participant
+l0_map('CTL_33') = 0.90 ;
 
 % l0_map('CTL_21') = 0.90 ; Si besoin
-% l0_map('CTL_30') = 0.975 ;
-% l0_map('CTL_33') = 0.90 ;
 % l0_map('CTL_36') = 0.952 ;
 % l0_map('CTL_41') = 0.851 ;
 % l0_map('CTL_42') = 1.00 ;
@@ -88,3 +88,4 @@ fprintf('Fichier l0_participants.mat mis à jour avec succès!\n');
 fprintf('Chemin: %s\n', save_path);
 fprintf('Nombre total de participants: %d\n', length(participants_list));
 fprintf('Participants inclus: %s\n', strjoin(sort(participants_list), ', '));
+fprintf('\n💡 PROCHAINE ÉTAPE : Lancer Non_Dimensional_Normalization.m après avoir vérifié si participant(s) dans ParticipantGroup.m\n');

@@ -9,11 +9,11 @@ addpath(genpath('C:\Users\silve\OneDrive - Universite de Montreal\Silvere De Fre
 addpath(genpath('C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\functions'));
 
 %% === PARAMÈTRES À MODIFIER ===
-sujet_id = 'CTL_14';                              % ID du sujet à traiter
+sujet_id = 'CTL_33';                              % ID du sujet à traiter
 surfaces = {'Plat', 'Medium', 'High'};            % Surfaces étudiées
-essais = 1:4;                                    % Numéros des essais
-base_dir = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\Data\jeunes_enfants';    % Dossier contenant les C3D
-output_file_csv = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\result\MoS\MoS.csv';
+essais = 1:10;                                    % Numéros des essais
+base_dir = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\Data\adults';    % Dossier contenant les C3D
+output_file_csv = sprintf('C:\\Users\\silve\\Desktop\\DOCTORAT\\UNIV MONTREAL\\TRAVAUX-THESE\\Surfaces_Irregulieres\\Datas\\Script\\gaitAnalysisGUI\\result\\MoS\\MoS_results_%s.csv', sujet_id);
 output_file_mat = sprintf('C:\\Users\\silve\\Desktop\\DOCTORAT\\UNIV MONTREAL\\TRAVAUX-THESE\\Surfaces_Irregulieres\\Datas\\Script\\gaitAnalysisGUI\\result\\MoS\\MoS_results_%s.mat', sujet_id);
 
 % Fréquence d'acquisition
@@ -247,6 +247,8 @@ if height(results) > 0
 else
     fprintf('⚠️  Aucun résultat à sauvegarder\n');
 end
+
+fprintf('\n💡 PROCHAINE ÉTAPE : Lancer SpatioTemporal_Analysis.m\n');
 
 %% ========== FONCTIONS ==========
 
