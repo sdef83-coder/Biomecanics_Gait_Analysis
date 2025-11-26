@@ -42,15 +42,22 @@ for p = 1:length(participants)
             % === Jambe droite : ajout NormStepLength, NormCadence, NormWalkRatio, NormStepWidthHeel, et NormWalkSpeed ===
             N_right = length(c.resultsAll.kin.Right);
             for n = 1:N_right
-                distPasR = c.resultsAll.kin.Right(n).distPas;
+                distPasR = c.resultsAll.kin.Right(n).distPas; % en m
                 cadenceR = c.resultsAll.kin.Right(n).vitCadencePasParMinute * 2; % x2 car vitCadencePasParMinute = cycle/minute et non pas des ppm
-                LargPasR = c.resultsAll.kin.Right(n).stepWidthHeel / 10; % mm vers cm
-                WalkSpeedR = c.resultsAll.kin.Right(n).vitFoulee;
+                WalkSpeedR = c.resultsAll.kin.Right(n).vitFoulee; % en m/s
+
+                % Conversion stepWidthHeel
+                stepWidthMM = c.resultsAll.kin.Right(n).stepWidthHeel;  % original en mm
+                stepWidthCM = stepWidthMM / 10;   % conversion en cm
+                stepWidthM = stepWidthMM / 1000;  % conversion en m
+                % Stockage de la version en cm (celle utilisée pour l'analyse)
+                c.resultsAll.kin.Right(n).stepWidthHeel = stepWidthCM;
+
                 % (Hof et al., 1996) pour les méthodes de normalisation des variables
                 c.resultsAll.kin.Right(n).NormStepLength = distPasR / l0;
                 c.resultsAll.kin.Right(n).NormCadence = (cadenceR/60) * sqrt(l0 / g);
                 c.resultsAll.kin.Right(n).NormWalkRatio = (distPasR / l0) / ((cadenceR/60) * sqrt(l0 / g));
-                c.resultsAll.kin.Right(n).NormStepWidthHeel = LargPasR / l0;
+                c.resultsAll.kin.Right(n).NormStepWidthHeel = stepWidthM / l0;
                 c.resultsAll.kin.Right(n).NormWalkSpeed = WalkSpeedR / sqrt(l0*g);
             end
             
@@ -59,13 +66,19 @@ for p = 1:length(participants)
             for n = 1:N_left
                 distPasL = c.resultsAll.kin.Left(n).distPas;
                 cadenceL = c.resultsAll.kin.Left(n).vitCadencePasParMinute * 2;
-                LargPasL = c.resultsAll.kin.Left(n).stepWidthHeel / 10;
                 WalkSpeedL = c.resultsAll.kin.Left(n).vitFoulee;
+
+                stepWidthMM = c.resultsAll.kin.Left(n).stepWidthHeel;
+                stepWidthCM = stepWidthMM / 10;
+                stepWidthM = stepWidthMM / 1000;
+                
+                c.resultsAll.kin.Left(n).stepWidthHeel = stepWidthCM;
+
                 % (Hof et al., 1996) pour les méthodes de normalisation des variables
                 c.resultsAll.kin.Left(n).NormStepLength = distPasL / l0;
                 c.resultsAll.kin.Left(n).NormCadence = (cadenceL/60) * sqrt(l0 / g);
                 c.resultsAll.kin.Left(n).NormWalkRatio = (distPasL / l0) / ((cadenceL/60) * sqrt(l0 / g));
-                c.resultsAll.kin.Left(n).NormStepWidthHeel = LargPasL / l0;
+                c.resultsAll.kin.Left(n).NormStepWidthHeel = stepWidthM / l0;
                 c.resultsAll.kin.Left(n).NormWalkSpeed = WalkSpeedL / sqrt(l0*g);
             end
             
