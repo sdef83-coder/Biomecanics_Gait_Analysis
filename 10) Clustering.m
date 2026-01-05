@@ -48,6 +48,13 @@ domains.Variability = {
     'vitFoulee',      'Gait speed (m.s^{-1})',     'CV'  
 };
 
+domains.Smoothness = {
+    'COM_SPARC_Magnitude',  'COM SPARC Magnitude (ua)',  'Mean';
+    'COM_LDLJ_Magnitude',   'COM LDLJ Magnitude (ua)',   'Mean';
+    'STERN_SPARC_Magnitude','STERN SPARC Magnitude (ua)','Mean';
+    'STERN_LDLJ_Magnitude', 'STERN LDLJ Magnitude (ua)', 'Mean'
+};
+
 % === Mapping "nom technique" → "nom lisible" (ce que connaît la table) ===
 nameMap = containers.Map;
 nameMap('vitFoulee')               = 'Gait speed (m.s^{-1})';
@@ -61,6 +68,10 @@ nameMap('LargeurPas')              = 'Stride width (cm)';
 nameMap('DoubleSupport')           = 'Double support time (%)';
 nameMap('MoS_AP_HS_pL0')           = 'MoS AP HS (%L0)';
 nameMap('MoS_ML_HS_pL0')           = 'MoS ML HS (%L0)';
+nameMap('COM_SPARC_Magnitude')     = 'COM SPARC Magnitude (ua)';
+nameMap('COM_LDLJ_Magnitude')      = 'COM LDLJ Magnitude (ua)';
+nameMap('STERN_SPARC_Magnitude')   = 'STERN SPARC Magnitude (ua)';
+nameMap('STERN_LDLJ_Magnitude')    = 'STERN LDLJ Magnitude (ua)';
 
 % === Construction automatique de allVars depuis les domaines ===
 allVars = {};

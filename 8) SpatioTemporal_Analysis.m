@@ -11,6 +11,7 @@ addpath(genpath('C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Sur
 
 % Dossier où sont sauvegardés les résultats MoS par participant
 mos_dir = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\result\MoS';
+smooth_dir = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\result\Smoothness';
 
 % Chemin de sauvegarde
 save_path = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\result';
@@ -32,17 +33,37 @@ newNames = {'Single support time (%)', 'Double support time (%)','BaseOfSupport 
 
 renameMap = containers.Map(oldNames, newNames);
 
-% Ajoute après la définition de renameMap
+% MOS (raw)
 renameMap('MoS_AP_HS_mm')   = 'MoS AP HS (mm)';
 renameMap('MoS_AP_mean_mm') = 'MoS AP Stance (mm)';
 renameMap('MoS_ML_HS_mm')   = 'MoS ML HS (mm)';
 renameMap('MoS_ML_mean_mm') = 'MoS ML Stance (mm)';
 
-% exportes aussi %L0 :
+% MOS (%L0) :
 renameMap('MoS_AP_HS_pL0')   = 'MoS AP HS (%L0)';
 renameMap('MoS_AP_mean_pL0') = 'MoS AP Stance (%L0)';
 renameMap('MoS_ML_HS_pL0')   = 'MoS ML HS (%L0)';
 renameMap('MoS_ML_mean_pL0') = 'MoS ML Stance (%L0)';
+
+% Variables Smoothness - COM
+renameMap('COM_SPARC_AP')        = 'COM SPARC AP (ua)';
+renameMap('COM_SPARC_ML')        = 'COM SPARC ML (ua)';
+renameMap('COM_SPARC_V')         = 'COM SPARC V (ua)';
+renameMap('COM_SPARC_Magnitude') = 'COM SPARC Magnitude (ua)';
+renameMap('COM_LDLJ_AP')         = 'COM LDLJ AP (ua)';
+renameMap('COM_LDLJ_ML')         = 'COM LDLJ ML (ua)';
+renameMap('COM_LDLJ_V')          = 'COM LDLJ V (ua)';
+renameMap('COM_LDLJ_Magnitude')  = 'COM LDLJ Magnitude (ua)';
+
+% Variables Smoothness - STERNUM
+renameMap('STERN_SPARC_AP')        = 'STERN SPARC AP (ua)';
+renameMap('STERN_SPARC_ML')        = 'STERN SPARC ML (ua)';
+renameMap('STERN_SPARC_V')         = 'STERN SPARC V (ua)';
+renameMap('STERN_SPARC_Magnitude') = 'STERN SPARC Magnitude (ua)';
+renameMap('STERN_LDLJ_AP')         = 'STERN LDLJ AP (ua)';
+renameMap('STERN_LDLJ_ML')         = 'STERN LDLJ ML (ua)';
+renameMap('STERN_LDLJ_V')          = 'STERN LDLJ V (ua)';
+renameMap('STERN_LDLJ_Magnitude')  = 'STERN LDLJ Magnitude (ua)';
 
 prefixes = {'Mean_', 'CV_'};
 
@@ -105,6 +126,43 @@ catch ME
     % Les champs restent NaN (déjà initialisés par défaut)
 end
 % ==== fin Récup MoS ===
+
+% ==== Récup Smoothness pour ce participant et cette condition ====
+try
+    smoothAgg = get_smoothness_aggregates(participant, cond, smooth_dir);
+    
+    % COM - SPARC
+    row.Mean_COM_SPARC_AP        = smoothAgg.COM_SPARC_AP;
+    row.Mean_COM_SPARC_ML        = smoothAgg.COM_SPARC_ML;
+    row.Mean_COM_SPARC_V         = smoothAgg.COM_SPARC_V;
+    row.Mean_COM_SPARC_Magnitude = smoothAgg.COM_SPARC_Magnitude;
+    
+    % COM - LDLJ
+    row.Mean_COM_LDLJ_AP         = smoothAgg.COM_LDLJ_AP;
+    row.Mean_COM_LDLJ_ML         = smoothAgg.COM_LDLJ_ML;
+    row.Mean_COM_LDLJ_V          = smoothAgg.COM_LDLJ_V;
+    row.Mean_COM_LDLJ_Magnitude  = smoothAgg.COM_LDLJ_Magnitude;
+    
+    % STERNUM - SPARC
+    row.Mean_STERN_SPARC_AP        = smoothAgg.STERN_SPARC_AP;
+    row.Mean_STERN_SPARC_ML        = smoothAgg.STERN_SPARC_ML;
+    row.Mean_STERN_SPARC_V         = smoothAgg.STERN_SPARC_V;
+    row.Mean_STERN_SPARC_Magnitude = smoothAgg.STERN_SPARC_Magnitude;
+    
+    % STERNUM - LDLJ
+    row.Mean_STERN_LDLJ_AP         = smoothAgg.STERN_LDLJ_AP;
+    row.Mean_STERN_LDLJ_ML         = smoothAgg.STERN_LDLJ_ML;
+    row.Mean_STERN_LDLJ_V          = smoothAgg.STERN_LDLJ_V;
+    row.Mean_STERN_LDLJ_Magnitude  = smoothAgg.STERN_LDLJ_Magnitude;
+
+    % Garde aussi dans DATA
+    DATA.(participant).(cond).Smoothness = smoothAgg;
+
+catch ME
+    warning('Erreur Smoothness pour %s - %s : %s', participant, cond, ME.message);
+    % Les champs restent NaN (déjà initialisés par défaut)
+end
+% ==== fin Récup Smoothness ===
 
                 % Nombre de cycles
                 nCyclesLeft = size(data.c.resultsAll.kin.Left, 2);
@@ -330,15 +388,24 @@ groupList = {'JeunesEnfants', 'Enfants', 'Adolescents', 'Adultes'};
 originalNames = oldNames;
 newNamesBase  = newNames;  % même ordre que oldNames
 
-% Ajoute les variables MoS à exporter (si tu veux aussi %L0, garde ces lignes)
+% Ajoute les variables MoS et Smoothness à exporter
 mosTech = {'MoS_AP_HS_mm','MoS_AP_mean_mm','MoS_ML_HS_mm','MoS_ML_mean_mm', ...
            'MoS_AP_HS_pL0','MoS_AP_mean_pL0','MoS_ML_HS_pL0','MoS_ML_mean_pL0'};
 mosReadable = {'MoS AP HS (mm)','MoS AP Stance (mm)','MoS ML HS (mm)','MoS ML Stance (mm)', ...
                'MoS AP HS (%L0)','MoS AP Stance (%L0)','MoS ML HS (%L0)','MoS ML Stance (%L0)'};
 
-% Fusionne proprement
-originalNames = [originalNames, mosTech];
-newNamesAll   = [newNamesBase, mosReadable];
+smoothTech = {'COM_SPARC_AP', 'COM_SPARC_ML', 'COM_SPARC_V', 'COM_SPARC_Magnitude', ...
+    'COM_LDLJ_AP', 'COM_LDLJ_ML', 'COM_LDLJ_V', 'COM_LDLJ_Magnitude', ...
+    'STERN_SPARC_AP', 'STERN_SPARC_ML', 'STERN_SPARC_V', 'STERN_SPARC_Magnitude', ...
+    'STERN_LDLJ_AP', 'STERN_LDLJ_ML', 'STERN_LDLJ_V', 'STERN_LDLJ_Magnitude'};
+smoothReadable = {'COM SPARC AP (ua)', 'COM SPARC ML (ua)', 'COM SPARC V (ua)', 'COM SPARC Magnitude (ua)', ...
+    'COM LDLJ AP (ua)', 'COM LDLJ ML (ua)', 'COM LDLJ V (ua)', 'COM LDLJ Magnitude (ua)', ...
+    'STERN SPARC AP (ua)', 'STERN SPARC ML (ua)', 'STERN SPARC V (ua)', 'STERN SPARC Magnitude (ua)', ...
+    'STERN LDLJ AP (ua)', 'STERN LDLJ ML (ua)', 'STERN LDLJ V (ua)', 'STERN LDLJ Magnitude (ua)'};
+
+% Fusion avec les autres variables
+originalNames = [originalNames, mosTech, smoothTech];
+newNamesAll   = [newNamesBase, mosReadable, smoothReadable];
 
 % Map OK (même longueur des deux côtés)
 renameMapExport = containers.Map(originalNames, newNamesAll);
@@ -346,7 +413,7 @@ renameMapExport = containers.Map(originalNames, newNamesAll);
 % Préfixes à traiter : Moyenne + CV
 prefixes = {'Mean_', 'CV_'};
 
-% CORRECTION : Structure d'export par participant avec 1 ligne par participant
+% Structure d'export par participant avec 1 ligne par participant
 for p = 1:length(prefixes)
     prefix = prefixes{p};
     
@@ -446,7 +513,7 @@ for p = 1:length(prefixes)
     end
 end
 
-% OPTIONNEL : Afficher un résumé des exports
+% Résumé des exports
 fprintf('\n=== RÉSUMÉ DES EXPORTS ===\n');
 fprintf('Format: 1 ligne par participant avec colonnes Plat, Medium, High\n');
 for g = 1:length(groupList)
@@ -841,5 +908,125 @@ function mosAgg = get_mos_aggregates(participant, cond, mos_dir)
     
     if ismember('MoS_ML_Mean_P', T.Properties.VariableNames)
         mosAgg.MoS_ML_mean_pL0 = mean(T.MoS_ML_Mean_P, 'omitnan');
+    end
+end
+
+function smoothAgg = get_smoothness_aggregates(participant, cond, smooth_dir)
+% Retourne les moyennes par condition pour les indicateurs de smoothness
+% - Lit le fichier: smooth_dir/Smoothness_TrialBased_<participant>.mat
+% - Filtre par Surface==cond
+% - Retourne NaN si données manquantes
+
+    % Initialisation avec NaN par défaut
+    smoothAgg = struct();
+    
+    % COM
+    smoothAgg.COM_SPARC_AP        = NaN;
+    smoothAgg.COM_SPARC_ML        = NaN;
+    smoothAgg.COM_SPARC_V         = NaN;
+    smoothAgg.COM_SPARC_Magnitude = NaN;
+    smoothAgg.COM_LDLJ_AP         = NaN;
+    smoothAgg.COM_LDLJ_ML         = NaN;
+    smoothAgg.COM_LDLJ_V          = NaN;
+    smoothAgg.COM_LDLJ_Magnitude  = NaN;
+    
+    % STERNUM
+    smoothAgg.STERN_SPARC_AP        = NaN;
+    smoothAgg.STERN_SPARC_ML        = NaN;
+    smoothAgg.STERN_SPARC_V         = NaN;
+    smoothAgg.STERN_SPARC_Magnitude = NaN;
+    smoothAgg.STERN_LDLJ_AP         = NaN;
+    smoothAgg.STERN_LDLJ_ML         = NaN;
+    smoothAgg.STERN_LDLJ_V          = NaN;
+    smoothAgg.STERN_LDLJ_Magnitude  = NaN;
+
+    % Vérification du fichier
+    f = fullfile(smooth_dir, sprintf('Smoothness_TrialBased_%s.mat', participant));
+    if ~exist(f, 'file')
+        warning('Fichier Smoothness introuvable: %s', f);
+        return;
+    end
+
+    % Chargement
+    try
+        S = load(f, 'results');
+    catch ME
+        warning('Erreur de chargement pour %s: %s', participant, ME.message);
+        return;
+    end
+    
+    if ~isfield(S, 'results') || ~istable(S.results)
+        warning('Structure results invalide pour %s', participant);
+        return;
+    end
+    
+    T = S.results;
+
+    % Filtre par condition (Surface)
+    if ~ismember('Surface', T.Properties.VariableNames)
+        warning('La table Smoothness ne contient pas la colonne Surface pour %s', participant);
+        return;
+    end
+    
+    idx = strcmp(T.Surface, cond);
+    T = T(idx, :);
+    
+    if isempty(T)
+        warning('Aucun essai Smoothness pour %s - %s', participant, cond);
+        return;
+    end
+
+    % === Extraction des moyennes pour chaque métrique COM ===
+    if ismember('COM_SPARC_AP', T.Properties.VariableNames)
+        smoothAgg.COM_SPARC_AP = mean(T.COM_SPARC_AP, 'omitnan');
+    end
+    if ismember('COM_SPARC_ML', T.Properties.VariableNames)
+        smoothAgg.COM_SPARC_ML = mean(T.COM_SPARC_ML, 'omitnan');
+    end
+    if ismember('COM_SPARC_V', T.Properties.VariableNames)
+        smoothAgg.COM_SPARC_V = mean(T.COM_SPARC_V, 'omitnan');
+    end
+    if ismember('COM_SPARC_Magnitude', T.Properties.VariableNames)
+        smoothAgg.COM_SPARC_Magnitude = mean(T.COM_SPARC_Magnitude, 'omitnan');
+    end
+    
+    if ismember('COM_LDLJ_AP', T.Properties.VariableNames)
+        smoothAgg.COM_LDLJ_AP = mean(T.COM_LDLJ_AP, 'omitnan');
+    end
+    if ismember('COM_LDLJ_ML', T.Properties.VariableNames)
+        smoothAgg.COM_LDLJ_ML = mean(T.COM_LDLJ_ML, 'omitnan');
+    end
+    if ismember('COM_LDLJ_V', T.Properties.VariableNames)
+        smoothAgg.COM_LDLJ_V = mean(T.COM_LDLJ_V, 'omitnan');
+    end
+    if ismember('COM_LDLJ_Magnitude', T.Properties.VariableNames)
+        smoothAgg.COM_LDLJ_Magnitude = mean(T.COM_LDLJ_Magnitude, 'omitnan');
+    end
+
+    % === Extraction des moyennes pour chaque métrique STERNUM ===
+    if ismember('STERN_SPARC_AP', T.Properties.VariableNames)
+        smoothAgg.STERN_SPARC_AP = mean(T.STERN_SPARC_AP, 'omitnan');
+    end
+    if ismember('STERN_SPARC_ML', T.Properties.VariableNames)
+        smoothAgg.STERN_SPARC_ML = mean(T.STERN_SPARC_ML, 'omitnan');
+    end
+    if ismember('STERN_SPARC_V', T.Properties.VariableNames)
+        smoothAgg.STERN_SPARC_V = mean(T.STERN_SPARC_V, 'omitnan');
+    end
+    if ismember('STERN_SPARC_Magnitude', T.Properties.VariableNames)
+        smoothAgg.STERN_SPARC_Magnitude = mean(T.STERN_SPARC_Magnitude, 'omitnan');
+    end
+    
+    if ismember('STERN_LDLJ_AP', T.Properties.VariableNames)
+        smoothAgg.STERN_LDLJ_AP = mean(T.STERN_LDLJ_AP, 'omitnan');
+    end
+    if ismember('STERN_LDLJ_ML', T.Properties.VariableNames)
+        smoothAgg.STERN_LDLJ_ML = mean(T.STERN_LDLJ_ML, 'omitnan');
+    end
+    if ismember('STERN_LDLJ_V', T.Properties.VariableNames)
+        smoothAgg.STERN_LDLJ_V = mean(T.STERN_LDLJ_V, 'omitnan');
+    end
+    if ismember('STERN_LDLJ_Magnitude', T.Properties.VariableNames)
+        smoothAgg.STERN_LDLJ_Magnitude = mean(T.STERN_LDLJ_Magnitude, 'omitnan');
     end
 end
