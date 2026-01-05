@@ -92,6 +92,20 @@ for d = 1:nDomains
         end
        
         varFullName = [varType '_' baseName];
+        
+% === DEBUG ===
+if contains(varFullName, 'MoS AP HS')
+    fprintf('🔍 Recherche de : "%s"\n', varFullName);
+    if isfield(SpatioTemporalDATA, groups{1}) && ...
+       isfield(SpatioTemporalDATA.(groups{1}), condition)
+        T = SpatioTemporalDATA.(groups{1}).(condition);
+        fprintf('   Variables disponibles contenant "MoS" :\n');
+        mos_vars = T.Properties.VariableNames(contains(T.Properties.VariableNames, 'MoS'));
+        for i = 1:length(mos_vars)
+            fprintf('     - "%s"\n', mos_vars{i});
+        end
+    end
+end
         if strcmp(varType, 'Mean')
             labels{varIdx} = varDisplay;  % pas de mention du type
         else

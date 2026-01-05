@@ -1,4 +1,4 @@
-%% ANOVA À MESURES RÉPÉTÉES À DEUX FACTEURS 
+%% ANOVA À MESURES RÉPÉTÉES À DEUX FACTEURS - VERSION CORRIGÉE
 % Facteur 1: Groupe d'âge (between-subject)
 % Facteur 2: Surface (within-subject - mesures répétées)
 
@@ -10,10 +10,10 @@ addpath(genpath('C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Sur
 save_path = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\result\Statistics';
 if ~exist(save_path, 'dir'); mkdir(save_path); end
 
-% Charger les données après avoir exécuté votre script principal
+% Charger les données
 load('SpatioTemporalDATA.mat');
 
-% Variables issues du main (renommées)
+% Variables à analyser
 variablesToAnalyze = {
     % --- Moyennes spatio-temporelles ---
     'Mean_Single support time (%)'
@@ -75,11 +75,12 @@ variablesToAnalyze = {
 };
 
 groupList = {'JeunesEnfants', 'Enfants', 'Adolescents', 'Adultes'};
+groupOrder = categorical(groupList, groupList, 'Ordinal', true);
 Condition = {'Plat', 'Medium', 'High'};
 
 anovaResults = struct();
 
-% BOUCLE PRINCIPALE POUR CHAQUE VARIABLE
+%% BOUCLE PRINCIPALE POUR CHAQUE VARIABLE
 for iVar = 1:length(variablesToAnalyze)
     varName = variablesToAnalyze{iVar};
     fprintf('\n=== ANALYSE ANOVA POUR : %s ===\n', varName);
@@ -95,7 +96,7 @@ for iVar = 1:length(variablesToAnalyze)
         groupName = groupList{g};
         
         if isfield(SpatioTemporalDATA, groupName)
-            % Obtenir la liste des participants pour ce groupe à partir de Plat
+            % Obtenir la liste des participants pour ce groupe
             if isfield(SpatioTemporalDATA.(groupName), 'Plat')
                 groupTable = SpatioTemporalDATA.(groupName).Plat;
                 if ~isempty(groupTable) && any(strcmp(groupTable.Properties.VariableNames, varName))
@@ -159,11 +160,23 @@ for iVar = 1:length(variablesToAnalyze)
         warning('Aucune donnée complète pour la variable %s → variable ignorée.', varName);
         continue;
     end
+    
+    % *** Vérifier qu'il y a au moins 2 participants par groupe ***
+    uniqueGroups = unique(groupLabels);
+    groupCounts = zeros(length(uniqueGroups), 1);
+    for gg = 1:length(uniqueGroups)
+        groupCounts(gg) = sum(strcmp(groupLabels, uniqueGroups{gg}));
+    end
+    
+    if any(groupCounts < 2)
+        warning('Au moins un groupe a moins de 2 participants pour %s → variable ignorée.', varName);
+        continue;
+    end
 
     meanAcross = mean(allData, 2);
 
     % Table wide
-    groupLabelsCat = categorical(groupLabels(:));
+    groupLabelsCat = categorical(groupLabels(:), groupList, 'Ordinal', true);
     T = table( ...
         categorical(participantIDs(:)), ...
         groupLabelsCat, ...
@@ -173,7 +186,7 @@ for iVar = 1:length(variablesToAnalyze)
         'VariableNames', {'Participant', 'Groupe', 'Plat', 'Medium', 'High'});
 
     % STATISTIQUES DESCRIPTIVES
-    fprintf('\n--- STATISTIQUES DESCRIPTIVES (format wide) ---\n');
+    fprintf('\n--- STATISTIQUES DESCRIPTIVES ---\n');
     descriptives = table();
     for c = 1:length(Condition)
         condName = Condition{c};
@@ -191,7 +204,7 @@ for iVar = 1:length(variablesToAnalyze)
     end
     disp(descriptives);
 
-    % --- Tests d'hypothèses (normalité / homoscédasticité) ---
+    % TESTS D'HYPOTHÈSES
     normalityPassed    = true;
     homogeneityPassed  = true;
 
@@ -199,14 +212,14 @@ for iVar = 1:length(variablesToAnalyze)
         [swH, swP] = swtest(allData(:, col), 0.05);
         if swH == 1
             normalityPassed = false;
-            fprintf('⚠️ Non normal sur surface %d (p=%.4f)\n', col, swP);
+            fprintf('⚠️ Non normalité sur %s (p=%.4f)\n', Condition{col}, swP);
         end
 
         p_levene = vartestn(allData(:, col), groupLabels(:), ...
             'TestType', 'LeveneAbsolute', 'Display', 'off');
         if p_levene < 0.05
             homogeneityPassed = false;
-            fprintf('⚠️ Levene non ok pour surface %d (p=%.4f)\n', col, p_levene);
+            fprintf('⚠️ Hétérogénéité des variances sur %s (p=%.4f)\n', Condition{col}, p_levene);
         end
     end
 
@@ -214,19 +227,20 @@ for iVar = 1:length(variablesToAnalyze)
     % ===============  CAS NON PARAMÉTRIQUE  ==================
     % =========================================================
     if ~normalityPassed || ~homogeneityPassed
-        fprintf('➡️ Passage aux tests NON PARAMÉTRIQUES\n');
+        fprintf('➡️ Analyse NON PARAMÉTRIQUE\n');
 
-        % Friedman (surface)
+        % Friedman (effet Surface - intra-sujet)
         p_friedman = friedman(allData, 1, 'off');
-        fprintf('Friedman (surface) : p = %.4f\n', p_friedman);
+        fprintf('Friedman (Surface) : p = %.4f\n', p_friedman);
 
         posthoc_surface = [];
         if p_friedman < 0.05
+            % Post-hoc avec Wilcoxon signed-rank
             p12 = signrank(allData(:,1), allData(:,2)); % Plat vs Medium
             p13 = signrank(allData(:,1), allData(:,3)); % Plat vs High
             p23 = signrank(allData(:,2), allData(:,3)); % Medium vs High
 
-            fprintf('Post-hoc Friedman (paires Surface) :\n');
+            fprintf('Post-hoc Friedman :\n');
             fprintf('  Plat vs Medium : p = %.4f\n', p12);
             fprintf('  Plat vs High   : p = %.4f\n', p13);
             fprintf('  Medium vs High : p = %.4f\n', p23);
@@ -237,20 +251,20 @@ for iVar = 1:length(variablesToAnalyze)
                 'VariableNames', {'Comparison', 'pValue'});
         end
 
-        % Kruskal-Wallis (groupe) sur la moyenne des surfaces
+        % Kruskal-Wallis (effet Groupe - entre-sujets)
         meanAcross = mean(allData, 2);
-        [p_kruskal, tbl_kw, stats_kw] = kruskalwallis(meanAcross, groupLabels, 'off'); %#ok<ASGLU>
-        fprintf('Kruskal-Wallis (groupe) : p = %.4f\n', p_kruskal);
+        [p_kruskal, ~, stats_kw] = kruskalwallis(meanAcross, groupLabels, 'off');
+        fprintf('Kruskal-Wallis (Groupe) : p = %.4f\n', p_kruskal);
 
         posthoc_groupe = [];
         if p_kruskal < 0.05
             c_groupe_np = multcompare(stats_kw, 'Display', 'off');
-            disp('Post-hoc Kruskal-Wallis (groupes) :');
+            fprintf('Post-hoc Kruskal-Wallis :\n');
             disp(c_groupe_np);
             posthoc_groupe = c_groupe_np;
         end
 
-        % ===== stockage propre =====
+        % Stockage
         resNP = struct();
         resNP.analysisType = 'nonparametric';
         resNP.dataWide     = T;
@@ -267,36 +281,152 @@ for iVar = 1:length(variablesToAnalyze)
         resNP.group.posthoc   = posthoc_groupe;
 
         anovaResults.(matlab.lang.makeValidName(varName)) = resNP;
-        continue;   % variable suivante
+        continue;
     end
 
     % =========================================================
     % ===============  CAS PARAMÉTRIQUE  ======================
     % =========================================================
     try
+        fprintf('➡️ Analyse PARAMÉTRIQUE (ANOVA mixte)\n');
+        
         % Design intra-sujet
         within = table(categorical({'Plat'; 'Medium'; 'High'}), 'VariableNames', {'Surface'});
 
-        % fitrm : colonnes de Plat à High
+        % Modèle à mesures répétées
         rm = fitrm(T, 'Plat-High ~ Groupe', 'WithinDesign', within);
 
-        % ANOVA RM intra-sujet
+        % ANOVA intra-sujet (Surface + Interaction)
         ranovatbl = ranova(rm);
+        fprintf('\n--- Table ANOVA à mesures répétées ---\n');
         disp(ranovatbl);
+        
+        % Test de sphéricité
         statsSphericity = mauchly(rm);
+        fprintf('\n--- Test de sphéricité de Mauchly ---\n');
+        disp(statsSphericity);
 
-        % Effet entre-sujets (Groupe) via anova(rm)
-        betweenTbl = anova(rm, 'BetweenModel', 'Groupe');
+        % CORRECTION : ANOVA entre-sujets (Groupe)
+        betweenTbl = anova(rm);
+        fprintf('\n--- Table ANOVA entre-sujets ---\n');
+        disp(betweenTbl);
 
-        % moyenne inter-surface pour éventuels post-hoc de groupe
-        T.MeanAcrossSurfaces = mean(T{:, {'Plat','Medium','High'}}, 2);
-        meanAcross = T.MeanAcrossSurfaces;
+        % CALCUL DES η² PARTIELS
+        
+        % --- η² pour Surface (intra-sujet) ---
+idxSurf = strcmp(ranovatbl.Properties.RowNames, '(Intercept):Surface');
+if any(idxSurf)
+    SS_surf = ranovatbl.SumSq(idxSurf);
+    idxErrSurf = find(idxSurf) + 1;
+    if idxErrSurf <= height(ranovatbl)
+        SS_err_surf = ranovatbl.SumSq(idxErrSurf);
+        eta2_surface = SS_surf / (SS_surf + SS_err_surf);
+    else
+        eta2_surface = NaN;
+    end
+    pSurface = ranovatbl.pValueGG(idxSurf);
+else
+    eta2_surface = NaN;
+    pSurface = NaN;
+end
 
-        % Normalité de la moyenne inter-surfaces (entre-sujets)
-        [swH_group, swP_group] = swtest(meanAcross, 0.05); %#ok<NASGU>
-        groupNormalityPassed   = (swH_group == 0);
+% --- η² pour Interaction ---
+idxInt = strcmp(ranovatbl.Properties.RowNames, 'Groupe:Surface');
+if any(idxInt)
+    SS_int = ranovatbl.SumSq(idxInt);
+    idxErrInt = find(idxInt) + 1;
+    if idxErrInt <= height(ranovatbl)
+        SS_err_int = ranovatbl.SumSq(idxErrInt);
+        eta2_interaction = SS_int / (SS_int + SS_err_int);
+    else
+        eta2_interaction = NaN;
+    end
+    pInteraction = ranovatbl.pValueGG(idxInt);
+else
+    eta2_interaction = NaN;
+    pInteraction = NaN;
+end
 
-        % ===== stockage paramétrique =====
+% --- η² pour Groupe (entre-sujets) ---
+pGroup = NaN;
+eta2_group = NaN;
+
+% La colonne s'appelle 'Between'
+if ismember('Between', betweenTbl.Properties.VariableNames)
+    % CORRECTION : Between est categorical, pas cell
+    % Conversion en string pour comparaison
+    betweenValues = string(betweenTbl.Between);
+    
+    % Recherche des lignes (case-insensitive)
+    idxG = strcmpi(betweenValues, 'Groupe');
+    idxErr = strcmpi(betweenValues, 'Error');
+    
+    if any(idxG) && any(idxErr)
+        SS_group = betweenTbl.SumSq(idxG);
+        SS_err_group = betweenTbl.SumSq(idxErr);
+        eta2_group = SS_group / (SS_group + SS_err_group);
+        pGroup = betweenTbl.pValue(idxG);
+    else
+        warning('Lignes Groupe ou Error introuvables dans betweenTbl pour %s', varName);
+    end
+elseif ismember('Source', betweenTbl.Properties.VariableNames)
+    % Anciennes versions MATLAB
+    sourceValues = string(betweenTbl.Source);
+    idxG = strcmpi(sourceValues, 'Groupe');
+    idxErr = strcmpi(sourceValues, 'Error');
+    
+    if any(idxG) && any(idxErr)
+        SS_group = betweenTbl.SumSq(idxG);
+        SS_err_group = betweenTbl.SumSq(idxErr);
+        eta2_group = SS_group / (SS_group + SS_err_group);
+        pGroup = betweenTbl.pValue(idxG);
+    end
+else
+    % Fallback : extraction par indices de ligne
+    if height(betweenTbl) >= 3
+        SS_group = betweenTbl.SumSq(2);      % Ligne 2 = Groupe
+        SS_err_group = betweenTbl.SumSq(3);  % Ligne 3 = Error
+        pGroup = betweenTbl.pValue(2);
+        eta2_group = SS_group / (SS_group + SS_err_group);
+    else
+        warning('Structure betweenTbl inconnue pour %s', varName);
+    end
+end
+
+        fprintf('\n--- Tailles d''effet (η² partiel) ---\n');
+        fprintf('Groupe     : η² = %.4f (p = %.4f)\n', eta2_group, pGroup);
+        fprintf('Surface    : η² = %.4f (p = %.4f)\n', eta2_surface, pSurface);
+        fprintf('Interaction: η² = %.4f (p = %.4f)\n', eta2_interaction, pInteraction);
+
+        % POST-HOCS
+        
+        % Post-hoc Surface
+        posthoc_surface = [];
+        if pSurface < 0.05
+            fprintf('\n--- Post-hoc Surface (comparaisons par paires) ---\n');
+            posthoc_surface = multcompare(rm, 'Surface');
+            disp(posthoc_surface);
+        end
+
+        % Post-hoc Interaction
+        posthoc_interaction = [];
+        if pInteraction < 0.05
+            fprintf('\n--- Post-hoc Interaction (Surface × Groupe) ---\n');
+            posthoc_interaction = multcompare(rm, 'Surface', 'By', 'Groupe');
+            disp(posthoc_interaction);
+        end
+
+        % Post-hoc Groupe
+        posthoc_groupe = [];
+        if pGroup < 0.05
+            fprintf('\n--- Post-hoc Groupe (comparaisons par paires) ---\n');
+            meanAcross = mean(T{:, {'Plat','Medium','High'}}, 2);
+            [~, ~, statsGroup] = anova1(meanAcross, T.Groupe, 'off');
+            posthoc_groupe = multcompare(statsGroup, 'Display', 'off');
+            disp(posthoc_groupe);
+        end
+
+        % STOCKAGE STRUCTURÉ
         res = struct();
         res.analysisType = 'parametric';
         res.dataWide     = T;
@@ -308,121 +438,101 @@ for iVar = 1:length(variablesToAnalyze)
         res.sphericity   = statsSphericity;
         res.between      = betweenTbl;
 
-        % ----- Surface -----
-        res.surface = struct();
-        if any(strcmp(ranovatbl.Properties.RowNames, '(Intercept):Surface'))
-            idxSurf = strcmp(ranovatbl.Properties.RowNames, '(Intercept):Surface');
-            res.surface.test = 'RM-ANOVA (ranova)';
-            res.surface.p    = ranovatbl.pValueGG(idxSurf);  % correction GG
-            if res.surface.p < 0.05
-                res.surface.posthoc = multcompare(rm, 'Surface');
-            else
-                res.surface.posthoc = [];
-            end
-        else
-            res.surface.test    = 'RM-ANOVA (ranova)';
-            res.surface.p       = NaN;
-            res.surface.posthoc = [];
-        end
+        % Surface
+        res.surface.test    = 'RM-ANOVA';
+        res.surface.p       = pSurface;
+        res.surface.eta2    = eta2_surface;
+        res.surface.posthoc = posthoc_surface;
 
-        % ----- Interaction -----
-        res.interaction = struct();
-        if any(strcmp(ranovatbl.Properties.RowNames, 'Groupe:Surface'))
-            idxInt = strcmp(ranovatbl.Properties.RowNames, 'Groupe:Surface');
-            res.interaction.test = 'RM-ANOVA (ranova)';
-            res.interaction.p    = ranovatbl.pValueGG(idxInt);
-            if res.interaction.p < 0.05
-                res.interaction.posthoc = multcompare(rm, 'Surface', 'By','Groupe');
-            else
-                res.interaction.posthoc = [];
-            end
-        else
-            res.interaction.test    = 'RM-ANOVA (ranova)';
-            res.interaction.p       = NaN;
-            res.interaction.posthoc = [];
-        end
+        % Interaction
+        res.interaction.test    = 'RM-ANOVA';
+        res.interaction.p       = pInteraction;
+        res.interaction.eta2    = eta2_interaction;
+        res.interaction.posthoc = posthoc_interaction;
 
-        % ----- Groupe (entre-sujets) via betweenTbl -----
-        res.group = struct();
-        res.group.test  = 'Between ANOVA (anova)';
-        res.group.p     = NaN;
-        res.group.table = betweenTbl;
+        % Groupe
+        res.group.test    = 'Between-subjects ANOVA';
+        res.group.p       = pGroup;
+        res.group.eta2    = eta2_group;
+        res.group.posthoc = posthoc_groupe;
 
-        if ismember('Source', betweenTbl.Properties.VariableNames)
-            idxG = strcmp(betweenTbl.Source,'Groupe');
-            if any(idxG)
-                res.group.p = betweenTbl.pValue(idxG);
-            end
-        end
-
-        % Post-hoc de groupe si normalité OK et effet groupe significatif
-        if ~isnan(res.group.p) && groupNormalityPassed && res.group.p < 0.05
-            [~, ~, statsGroup] = anova1(meanAcross, T.Groupe, 'off');
-            res.group.posthoc = multcompare(statsGroup, 'Display','off');
-        else
-            res.group.posthoc = [];
-        end
-
-        % Sauvegarde dans struct global
         anovaResults.(matlab.lang.makeValidName(varName)) = res;
 
     catch ME
         fprintf('⚠️ Erreur pour %s : %s\n', varName, ME.message);
+        fprintf('   Stack: %s\n', ME.stack(1).name);
         continue;
     end
 
 end % fin boucle variables
 
-% SAUVEGARDER LES RÉSULTATS
+%% SAUVEGARDE
 save(fullfile(save_path, 'ANOVA_Results.mat'), 'anovaResults');
+fprintf('\n✅ Résultats sauvegardés : %s\n', fullfile(save_path, 'ANOVA_Results.mat'));
 
-% RÉSUMÉ FINAL + EXPORT CSV
-fprintf('\n=== RÉSUMÉ FINAL DES RÉSULTATS ANOVA (p < 0.05) OU tests non paramétriques ===\n');
+%% EXPORT CSV RÉCAPITULATIF
+fprintf('\n=== GÉNÉRATION DU TABLEAU RÉCAPITULATIF ===\n');
 
 varNames = fieldnames(anovaResults);
 recapTable = table();
 
 for i = 1:length(varNames)
     varName = varNames{i};
-    fprintf('%s\n', strrep(varName, '_', ' '));
-
-    % init
+    
+    % Initialisation
+    testUsed = 'Unknown';
     pGroup = NaN; eta2Group = NaN; starsGroup = '';
     pSurface = NaN; eta2Surface = NaN; starsSurface = '';
     pInteraction = NaN; eta2Interaction = NaN; starsInteraction = '';
-    testUsed = 'Parametric';
 
     resVar = anovaResults.(varName);
 
-    if isfield(resVar, 'analysisType') && strcmp(resVar.analysisType, 'parametric')
-        % --- Groupe (entre-sujets)
-        if isfield(resVar, 'group') && isfield(resVar.group, 'p')
-            pGroup = resVar.group.p;
-            starsGroup = repmat('*', 1, sum(pGroup < [0.05 0.01 0.001]));
+    if isfield(resVar, 'analysisType')
+        if strcmp(resVar.analysisType, 'parametric')
+            testUsed = 'Parametric (Mixed ANOVA)';
+            
+            % Groupe
+            if isfield(resVar, 'group')
+                pGroup = resVar.group.p;
+                eta2Group = resVar.group.eta2;
+                starsGroup = repmat('*', 1, sum(pGroup < [0.05 0.01 0.001]));
+            end
+            
+            % Surface
+            if isfield(resVar, 'surface')
+                pSurface = resVar.surface.p;
+                eta2Surface = resVar.surface.eta2;
+                starsSurface = repmat('*', 1, sum(pSurface < [0.05 0.01 0.001]));
+            end
+            
+            % Interaction
+            if isfield(resVar, 'interaction')
+                pInteraction = resVar.interaction.p;
+                eta2Interaction = resVar.interaction.eta2;
+                starsInteraction = repmat('*', 1, sum(pInteraction < [0.05 0.01 0.001]));
+            end
+            
+        elseif strcmp(resVar.analysisType, 'nonparametric')
+            testUsed = 'Non-parametric';
+            
+            % Groupe
+            if isfield(resVar, 'group')
+                pGroup = resVar.group.p;
+                starsGroup = repmat('*', 1, sum(pGroup < [0.05 0.01 0.001]));
+            end
+            
+            % Surface
+            if isfield(resVar, 'surface')
+                pSurface = resVar.surface.p;
+                starsSurface = repmat('*', 1, sum(pSurface < [0.05 0.01 0.001]));
+            end
         end
-
-        % --- Surface
-        if isfield(resVar, 'surface')
-            pSurface = resVar.surface.p;
-            starsSurface = repmat('*', 1, sum(pSurface < [0.05 0.01 0.001]));
-        end
-
-        % --- Interaction
-        if isfield(resVar, 'interaction')
-            pInteraction = resVar.interaction.p;
-            starsInteraction = repmat('*', 1, sum(pInteraction < [0.05 0.01 0.001]));
-        end
-
-    elseif isfield(resVar, 'analysisType') && strcmp(resVar.analysisType, 'nonparametric')
-        testUsed = 'Non-parametric';
-        pGroup   = resVar.group.p;
-        pSurface = resVar.surface.p;
-        starsGroup   = repmat('*', 1, sum(pGroup < [0.05 0.01 0.001]));
-        starsSurface = repmat('*', 1, sum(pSurface < [0.05 0.01 0.001]));
     end
 
-    % ligne recap
-    recapTable = [recapTable; table({strrep(varName,'_',' ')}, {testUsed}, ...
+    % Ajout au tableau récapitulatif
+    recapTable = [recapTable; table( ...
+        {strrep(varName,'_',' ')}, ...
+        {testUsed}, ...
         pGroup, {starsGroup}, eta2Group, ...
         pSurface, {starsSurface}, eta2Surface, ...
         pInteraction, {starsInteraction}, eta2Interaction, ...
@@ -435,9 +545,32 @@ end
 % Export CSV
 outputDir = fullfile(save_path, 'Anova_Recap');
 if ~exist(outputDir, 'dir'); mkdir(outputDir); end
-writetable(recapTable, fullfile(outputDir, 'ANOVA_Recap_Global.csv'));
+
+csvFilePath = fullfile(outputDir, 'ANOVA_Recap_Global.csv');
+writetable(recapTable, csvFilePath);
 
 fprintf('\n=== RÉSUMÉ FINAL ===\n');
-fprintf('Analyses ANOVA réalisées pour %d variables\n', length(fieldnames(anovaResults)));
-fprintf('Résultats sauvegardés dans : %s\n', fullfile(save_path, 'ANOVA_Results.mat'));
-fprintf('✅ Fichier CSV global exporté dans : %s\n', fullfile(outputDir, 'ANOVA_Recap_Global.csv'));
+fprintf('✅ Analyses ANOVA réalisées pour %d variables\n', length(varNames));
+fprintf('✅ Tableau récapitulatif exporté : %s\n', csvFilePath);
+fprintf('\n📊 Variables significatives (p < 0.05) :\n');
+
+% Affichage des résultats significatifs
+for i = 1:height(recapTable)
+    if recapTable.p_Groupe(i) < 0.05 || recapTable.p_Surface(i) < 0.05 || recapTable.p_Interaction(i) < 0.05
+        fprintf('  • %s\n', recapTable.Variable{i});
+        if recapTable.p_Groupe(i) < 0.05
+            fprintf('    - Groupe: p=%.4f, η²=%.3f %s\n', ...
+                recapTable.p_Groupe(i), recapTable.Eta2_Groupe(i), recapTable.Stars_Groupe{i});
+        end
+        if recapTable.p_Surface(i) < 0.05
+            fprintf('    - Surface: p=%.4f, η²=%.3f %s\n', ...
+                recapTable.p_Surface(i), recapTable.Eta2_Surface(i), recapTable.Stars_Surface{i});
+        end
+        if recapTable.p_Interaction(i) < 0.05
+            fprintf('    - Interaction: p=%.4f, η²=%.3f %s\n', ...
+                recapTable.p_Interaction(i), recapTable.Eta2_Interaction(i), recapTable.Stars_Interaction{i});
+        end
+    end
+end
+
+disp('✅ Analyse terminée !');

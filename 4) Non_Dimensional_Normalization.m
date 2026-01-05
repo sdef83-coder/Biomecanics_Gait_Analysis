@@ -15,8 +15,8 @@ load('l0_participants.mat', 'l0_map');
 g = 9.81;
 
 % Liste des participants à traiter (peut être automatiquement générée)
-%participants = keys(l0_map); % Récupère automatiquement tous les participants du fichier L0
-participants = {'CTL_30', 'CTL_33'}; % Si besoin de changer qu'un seul participant, décommentez et commentez la ligne au dessus
+% participants = keys(l0_map); % Récupère automatiquement tous les participants du fichier L0
+participants = {'CTL_68'}; % Si besoin de changer qu'un seul participant, décommentez et commentez la ligne au dessus
 
 % Boucle pour chaque participant
 for p = 1:length(participants)

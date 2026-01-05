@@ -553,26 +553,34 @@ variables_to_plot = {
     % --- Moyennes spatio-temporelles ---
     'Mean_Single support time (%)'
     'Mean_Double support time (%)'
-    'Mean_Stride width (cm)'
+    'Mean_BaseOfSupport (cm)'
+    'Mean_StepWidth (cm)'
     'Mean_Gait speed (m.s^{-1})'
     'Mean_Stride length (m)'
     'Mean_Stride time (s)'
+    'Mean_WalkRatio'
     'Mean_Norm WR (ua)'
     'Mean_Cadence (step.min^{-1})'
     'Mean_Norm Step length (ua)'
     'Mean_Norm Cadence (ua)'
+    'Mean_Norm StepWidth (ua)'
+    'Mean_Norm Gait Speed (m.s^{-1})'
 
     % --- Variabilité ---
     'CV_Single support time (%)'
     'CV_Double support time (%)'
-    'CV_Stride width (cm)'
+    'CV_BaseOfSupport (cm)'
+    'CV_StepWidth (cm)'
     'CV_Gait speed (m.s^{-1})'
     'CV_Stride length (m)'
     'CV_Stride time (s)'
+    'CV_WalkRatio'
     'CV_Norm WR (ua)'
     'CV_Cadence (step.min^{-1})'
     'CV_Norm Step length (ua)'
     'CV_Norm Cadence (ua)'
+    'CV_Norm StepWidth (ua)'
+    'CV_Norm Gait Speed (m.s^{-1})'
 
     % --- MoS bruts (mm) ---
     'Mean_MoS AP HS (mm)'
@@ -591,6 +599,15 @@ variables_to_plot = {
     'SI_Stride time (s)'
     'SI_Stride length (m)'
     'SI_Double support time (%)'
+    'SI_Single support time (%)'
+    'SI_BaseOfSupport (cm)'
+    'SI_StepWidth (cm)'
+    'SI_WalkRatio'
+    'SI_Norm WR (ua)'
+    'SI_Cadence (step.min^{-1})'
+    'SI_Norm Step length (ua)'
+    'SI_Norm Cadence (ua)'
+    'SI_Norm StepWidth (ua)'
 };
 
 % Couleurs pour les 3 surfaces

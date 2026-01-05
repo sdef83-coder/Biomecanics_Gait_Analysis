@@ -18,7 +18,7 @@ participants = keys(l0_map);
 
 % === OPTION : traiter 1, plusieurs ou tous les participants ===
 RUN_ONLY_SOME = true;   % false = traiter tous les participants
-PARTICIPANTS_TO_RUN = {'CTL_30', 'CTL_33'};  % <--- liste de 1 ou plusieurs participant(s)
+PARTICIPANTS_TO_RUN = {'CTL_68'};  % <--- liste de 1 ou plusieurs participant(s)
 
 if RUN_ONLY_SOME
     % Vérifier que tous les IDs existent
@@ -129,9 +129,12 @@ for p = 1:length(participants)
         c.resultsAll.kin.Left_original = c.resultsAll.kin.Left;
         c.resultsAll.kin.Right_original = c.resultsAll.kin.Right;
         
-        % Sélection aléatoire avec seed spécifique pour cette condition
+        % Sélection aléatoire avec seed spécifique pour cette condition et
+        % ce participant
         % (pour garantir la reproductibilité)
-        participant_seed = RANDOM_SEED + p*1000 + iC*10; % Seed unique par participant/condition
+        base_participant_seed = stable_seed_from_id(participant, RANDOM_SEED);
+        participant_seed = base_participant_seed + iC*10; 
+
         
         % Sélectionner Left
         if cycle_counts.(cond).Left > n_left_target
@@ -402,4 +405,25 @@ function summary_table = create_summary_table_balanced(cycle_stats, participants
         eval(sprintf('summary_table.Original_%s_Right = Original_%s_Right(1:row_idx-1);', cond, cond));
         eval(sprintf('summary_table.Original_%s_Total = Original_%s_Total(1:row_idx-1);', cond, cond));
     end
+end
+
+function s = stable_seed_from_id(id, base_seed)
+% Génère un seed déterministe (reproductible) à partir de l'ID participant.
+% Stable quel que soit l'ordre/la liste des participants exécutés.
+%
+% Entrées:
+%   id        : ex 'CTL_57'
+%   base_seed : ex RANDOM_SEED (=42)
+%
+% Sortie:
+%   s : seed entier, utilisable par rng()
+
+    id = char(id);
+    weights = 1:numel(id);
+
+    % Somme pondérée des codes ASCII (déterministe, stable)
+    raw = sum(double(id) .* weights);
+
+    % Grand modulo pour rester dans une plage "propre"
+    s = base_seed + mod(raw, 1e9);
 end
