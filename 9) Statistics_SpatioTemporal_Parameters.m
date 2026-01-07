@@ -1,21 +1,31 @@
-%% ANOVA À MESURES RÉPÉTÉES À DEUX FACTEURS - VERSION CORRIGÉE
-% Facteur 1: Groupe d'âge (between-subject)
-% Facteur 2: Surface (within-subject - mesures répétées)
+%% ANALYSES STATISTIQUES AUTOMATISÉES - MODÈLES LINÉAIRES MIXTES (LMM)
+% Design: Surface (mesures répétées) × Groupe d'âge (inter-sujets)
+% Objectifs de correction:
+% 1) Interaction: obtenir F/DF/p (pas de NaN) -> test global via coefTest
+% 2) Reporter REML vs ML + DFMethod -> paramètres fixés et sauvegardés
+% 3) Garder random intercept seul -> (1|Participant)
+% 4) Clarifier FDR -> FDR appliquée séparément par "famille" d'effets (Surface / AgeGroup / Interaction)
 
 clc; clear; close all;
 
+%% =============== Chargement des données ===============
 cd('C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\result');
-addpath(genpath('C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\functions'));
+load('SpatioTemporalDATA.mat');   % doit contenir SpatioTemporalDATA
 
-save_path = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\result\Statistics';
-if ~exist(save_path, 'dir'); mkdir(save_path); end
+% Dossier de sortie
+stats_path = fullfile(pwd, 'Statistical_Analysis_LMM');
+if ~exist(stats_path, 'dir'), mkdir(stats_path); end
 
-% Charger les données
-load('SpatioTemporalDATA.mat');
+%% =============== Configuration ===============
+surfaces = {'Plat', 'Medium', 'High'};
+groups   = {'JeunesEnfants', 'Enfants', 'Adolescents', 'Adultes'};
 
-% Variables à analyser
-variablesToAnalyze = {
-    % --- Moyennes spatio-temporelles ---
+% Choix méthodologiques
+FIT_METHOD = 'REML';            % 'REML' ou 'ML'
+DF_METHOD  = 'Satterthwaite';   % si non supporté back off vers 'Residual'
+
+variables_to_test = {
+    % --- Paramètres spatio-temporelles ---
     'Mean_Single support time (%)'
     'Mean_Double support time (%)'
     'Mean_BaseOfSupport (cm)'
@@ -47,17 +57,21 @@ variablesToAnalyze = {
     'CV_Norm StepWidth (ua)'
     'CV_Norm Gait Speed (m.s^{-1})'
 
-    % --- MoS bruts (mm) ---
+    % --- Stabilité dynamique ---
     'Mean_MoS AP HS (mm)'
     'Mean_MoS ML HS (mm)'
     'Mean_MoS AP Stance (mm)'
     'Mean_MoS ML Stance (mm)'
-
-    % --- MoS normalisés (%L0) ---
     'Mean_MoS AP HS (%L0)'
     'Mean_MoS ML HS (%L0)'
     'Mean_MoS AP Stance (%L0)'
     'Mean_MoS ML Stance (%L0)'
+
+    % --- Smoothness ---
+    'Mean_COM SPARC Magnitude (ua)'
+    'Mean_COM LDLJ Magnitude (ua)'
+    'Mean_STERN SPARC Magnitude (ua)'
+    'Mean_STERN LDLJ Magnitude (ua)'
 
     % --- Indices de symétrie ---
     'SI_Stride time (s)'
@@ -74,503 +88,637 @@ variablesToAnalyze = {
     'SI_Norm StepWidth (ua)'
 };
 
-groupList = {'JeunesEnfants', 'Enfants', 'Adolescents', 'Adultes'};
-groupOrder = categorical(groupList, groupList, 'Ordinal', true);
-Condition = {'Plat', 'Medium', 'High'};
+%% =============== Préparation des données (format long) ===============
+fprintf('=== PRÉPARATION DES DONNÉES & EXPORT DATA FORMAT LONG ===\n');
 
-anovaResults = struct();
+% Fusion de toutes les conditions
+DATA_all = [SpatioTemporalDATA.ALL.Plat;
+            SpatioTemporalDATA.ALL.Medium;
+            SpatioTemporalDATA.ALL.High];
 
-%% BOUCLE PRINCIPALE POUR CHAQUE VARIABLE
-for iVar = 1:length(variablesToAnalyze)
-    varName = variablesToAnalyze{iVar};
-    fprintf('\n=== ANALYSE ANOVA POUR : %s ===\n', varName);
-    
-    % Préparer les données pour l'ANOVA
-    allData = [];
-    participantIDs = {};
-    groupLabels = {};
-    participantCounter = 1;
-    
-    % Parcourir chaque groupe d'âge
-    for g = 1:length(groupList)
-        groupName = groupList{g};
-        
-        if isfield(SpatioTemporalDATA, groupName)
-            % Obtenir la liste des participants pour ce groupe
-            if isfield(SpatioTemporalDATA.(groupName), 'Plat')
-                groupTable = SpatioTemporalDATA.(groupName).Plat;
-                if ~isempty(groupTable) && any(strcmp(groupTable.Properties.VariableNames, varName))
-                    participants = unique(groupTable.Participant);
-                    
-                    % Pour chaque participant
-                    for p = 1:length(participants)
-                        participantID = participants{p};
-                        participantData = [];
-                        validData = true;
-                        
-                        % Collecter les données pour les 3 surfaces
-                        for iC = 1:length(Condition)
-                            cond = Condition{iC};
-                            
-                            if isfield(SpatioTemporalDATA.(groupName), cond)
-                                condTable = SpatioTemporalDATA.(groupName).(cond);
-                                
-                                if ~isempty(condTable) && any(strcmp(condTable.Properties.VariableNames, varName))
-                                    participantRow = strcmp(condTable.Participant, participantID);
-                                    
-                                    if any(participantRow)
-                                        value = condTable.(varName)(participantRow);
-                                        if ~isempty(value) && ~isnan(value(1))
-                                            participantData(end+1) = value(1); %#ok<SAGROW>
-                                        else
-                                            validData = false;
-                                            break;
-                                        end
-                                    else
-                                        validData = false;
-                                        break;
-                                    end
-                                else
-                                    validData = false;
-                                    break;
-                                end
-                            else
-                                validData = false;
-                                break;
-                            end
-                        end
-                        
-                        % Si le participant a des données complètes pour les 3 surfaces
-                        if validData && length(participantData) == 3
-                            allData = [allData; participantData]; %#ok<AGROW>
-                            participantIDs{participantCounter,1} = participantID; %#ok<SAGROW>
-                            groupLabels{participantCounter,1} = groupName; %#ok<SAGROW>
-                            participantCounter = participantCounter + 1;
-                        end
-                    end
-                end
+% Harmoniser le facteur Surface
+if ismember('Condition', DATA_all.Properties.VariableNames) && ~ismember('Surface', DATA_all.Properties.VariableNames)
+    DATA_all.Properties.VariableNames{'Condition'} = 'Surface';
+end
+
+% Sécuriser colonnes minimales
+if ~ismember('Participant', DATA_all.Properties.VariableNames)
+    error('La colonne "Participant" est introuvable dans DATA_all.');
+end
+if ~ismember('Surface', DATA_all.Properties.VariableNames)
+    error('La colonne "Surface" (ou "Condition") est introuvable dans DATA_all.');
+end
+
+% Convertir en categoricals
+DATA_all.Participant = categorical(DATA_all.Participant);
+DATA_all.Surface     = categorical(DATA_all.Surface, surfaces); % force l'ordre
+
+% Mapping Participant -> AgeGroup
+fprintf('Construction du mapping Participant -> AgeGroup...\n');
+p2g = containers.Map('KeyType','char','ValueType','char');
+
+for g = 1:numel(groups)
+    gName = groups{g};
+    if ~isfield(SpatioTemporalDATA, gName), continue; end
+
+    for s = 1:numel(surfaces)
+        surfName = surfaces{s};
+        if ~isfield(SpatioTemporalDATA.(gName), surfName), continue; end
+
+        T = SpatioTemporalDATA.(gName).(surfName);
+        if isempty(T) || ~istable(T) || ~ismember('Participant', T.Properties.VariableNames), continue; end
+
+        parts = unique(string(T.Participant));
+        for k = 1:numel(parts)
+            key = char(parts(k));
+            if ~isKey(p2g, key)
+                p2g(key) = gName;
             end
         end
     end
-    
-    fprintf('Participants avec données complètes : %d\n', size(allData, 1));
+end
 
-    % *** Garde-fou : si aucune donnée complète, on saute cette variable ***
-    if isempty(allData)
-        warning('Aucune donnée complète pour la variable %s → variable ignorée.', varName);
-        continue;
+% Ajouter AgeGroup
+DATA_all.AgeGroup = repmat({''}, height(DATA_all), 1);
+parts_all = string(DATA_all.Participant);
+
+for i = 1:numel(parts_all)
+    key = char(parts_all(i));
+    if isKey(p2g, key)
+        DATA_all.AgeGroup{i} = p2g(key);
+    else
+        DATA_all.AgeGroup{i} = '';
     end
-    
-    % *** Vérifier qu'il y a au moins 2 participants par groupe ***
-    uniqueGroups = unique(groupLabels);
-    groupCounts = zeros(length(uniqueGroups), 1);
-    for gg = 1:length(uniqueGroups)
-        groupCounts(gg) = sum(strcmp(groupLabels, uniqueGroups{gg}));
-    end
-    
-    if any(groupCounts < 2)
-        warning('Au moins un groupe a moins de 2 participants pour %s → variable ignorée.', varName);
-        continue;
-    end
+end
 
-    meanAcross = mean(allData, 2);
+% Retirer lignes sans groupe
+missingGroup = cellfun(@isempty, DATA_all.AgeGroup);
+if any(missingGroup)
+    warning('%.0f lignes sans AgeGroup (participants non mappés). Elles seront retirées.', sum(missingGroup));
+    DATA_all(missingGroup, :) = [];
+end
 
-    % Table wide
-    groupLabelsCat = categorical(groupLabels(:), groupList, 'Ordinal', true);
-    T = table( ...
-        categorical(participantIDs(:)), ...
-        groupLabelsCat, ...
-        allData(:,1), ...
-        allData(:,2), ...
-        allData(:,3), ...
-        'VariableNames', {'Participant', 'Groupe', 'Plat', 'Medium', 'High'});
+% Catégorielles avec ordre
+DATA_all.AgeGroup = categorical(DATA_all.AgeGroup, groups, 'Ordinal', true);
 
-    % STATISTIQUES DESCRIPTIVES
-    fprintf('\n--- STATISTIQUES DESCRIPTIVES ---\n');
-    descriptives = table();
-    for c = 1:length(Condition)
-        condName = Condition{c};
-        temp     = varfun(@mean, T, 'InputVariables', condName, 'GroupingVariables', 'Groupe');
-        temp_std = varfun(@std,  T, 'InputVariables', condName, 'GroupingVariables', 'Groupe');
-        temp_n   = varfun(@numel,T, 'InputVariables', condName, 'GroupingVariables', 'Groupe');
+% Vérifier distribution (Plat)
+fprintf('\nDistribution des participants (surface Plat):\n');
+for g = 1:numel(groups)
+    n = sum(DATA_all.AgeGroup == groups{g} & DATA_all.Surface == 'Plat');
+    fprintf('  %s: %d participants\n', groups{g}, n);
+end
 
-        temp_all = table();
-        temp_all.Groupe  = temp.Groupe;
-        temp_all.Surface = repmat(categorical({condName}), height(temp), 1);
-        temp_all.Mean    = temp.(['mean_' condName]);
-        temp_all.Std     = temp_std.(['std_' condName]);
-        temp_all.N       = temp_n.(['numel_' condName]);
-        descriptives     = [descriptives; temp_all]; %#ok<AGROW>
-    end
-    disp(descriptives);
+% =============== Sauvegarde des données préparées (DATA_all) ===============
+fprintf('\nSauvegarde de DATA_all...\n');
 
-    % TESTS D'HYPOTHÈSES
-    normalityPassed    = true;
-    homogeneityPassed  = true;
+prep_path = fullfile(stats_path, 'Prepared_Data');
+if ~exist(prep_path, 'dir'), mkdir(prep_path); end
 
-    for col = 1:size(allData, 2)
-        [swH, swP] = swtest(allData(:, col), 0.05);
-        if swH == 1
-            normalityPassed = false;
-            fprintf('⚠️ Non normalité sur %s (p=%.4f)\n', Condition{col}, swP);
-        end
+save(fullfile(prep_path, 'DATA_all_prepared.mat'), 'DATA_all', '-v7.3');
+fprintf('✓ DATA_all_prepared.mat sauvegardé\n');
 
-        p_levene = vartestn(allData(:, col), groupLabels(:), ...
-            'TestType', 'LeveneAbsolute', 'Display', 'off');
-        if p_levene < 0.05
-            homogeneityPassed = false;
-            fprintf('⚠️ Hétérogénéité des variances sur %s (p=%.4f)\n', Condition{col}, p_levene);
-        end
-    end
+DATA_all_csv = DATA_all;
+varsCat = varfun(@iscategorical, DATA_all_csv, 'OutputFormat', 'uniform');
+catNames = DATA_all_csv.Properties.VariableNames(varsCat);
+for k = 1:numel(catNames)
+    DATA_all_csv.(catNames{k}) = string(DATA_all_csv.(catNames{k}));
+end
+writetable(DATA_all_csv, fullfile(prep_path, 'DATA_all_prepared.csv'));
+fprintf('✓ DATA_all_prepared.csv sauvegardé\n');
 
-    % =========================================================
-    % ===============  CAS NON PARAMÉTRIQUE  ==================
-    % =========================================================
-    if ~normalityPassed || ~homogeneityPassed
-        fprintf('➡️ Analyse NON PARAMÉTRIQUE\n');
+%% =============== Analyses LMM pour chaque variable ===============
+results_summary  = table();
+detailed_results = struct();
+failed_analyses  = {};
 
-        % Friedman (effet Surface - intra-sujet)
-        p_friedman = friedman(allData, 1, 'off');
-        fprintf('Friedman (Surface) : p = %.4f\n', p_friedman);
+fprintf('\n=== ANALYSE STATISTIQUE LMM ===\n');
 
-        posthoc_surface = [];
-        if p_friedman < 0.05
-            % Post-hoc avec Wilcoxon signed-rank
-            p12 = signrank(allData(:,1), allData(:,2)); % Plat vs Medium
-            p13 = signrank(allData(:,1), allData(:,3)); % Plat vs High
-            p23 = signrank(allData(:,2), allData(:,3)); % Medium vs High
+allVarNames = DATA_all.Properties.VariableNames;
 
-            fprintf('Post-hoc Friedman :\n');
-            fprintf('  Plat vs Medium : p = %.4f\n', p12);
-            fprintf('  Plat vs High   : p = %.4f\n', p13);
-            fprintf('  Medium vs High : p = %.4f\n', p23);
+for v = 1:numel(variables_to_test)
+    label = variables_to_test{v};
+    fprintf('\n--- Variable %d/%d: %s ---\n', v, numel(variables_to_test), label);
+    yName = resolve_varname(label, allVarNames);
 
-            posthoc_surface = table( ...
-                {'Plat vs Medium'; 'Plat vs High'; 'Medium vs High'}, ...
-                [p12; p13; p23], ...
-                'VariableNames', {'Comparison', 'pValue'});
-        end
-
-        % Kruskal-Wallis (effet Groupe - entre-sujets)
-        meanAcross = mean(allData, 2);
-        [p_kruskal, ~, stats_kw] = kruskalwallis(meanAcross, groupLabels, 'off');
-        fprintf('Kruskal-Wallis (Groupe) : p = %.4f\n', p_kruskal);
-
-        posthoc_groupe = [];
-        if p_kruskal < 0.05
-            c_groupe_np = multcompare(stats_kw, 'Display', 'off');
-            fprintf('Post-hoc Kruskal-Wallis :\n');
-            disp(c_groupe_np);
-            posthoc_groupe = c_groupe_np;
-        end
-
-        % Stockage
-        resNP = struct();
-        resNP.analysisType = 'nonparametric';
-        resNP.dataWide     = T;
-        resNP.meta.groupsOrder   = groupList;
-        resNP.meta.surfacesOrder = Condition;
-        resNP.descriptives = descriptives;
-
-        resNP.surface.test    = 'Friedman';
-        resNP.surface.p       = p_friedman;
-        resNP.surface.posthoc = posthoc_surface;
-
-        resNP.group.test      = 'KruskalWallis';
-        resNP.group.p         = p_kruskal;
-        resNP.group.posthoc   = posthoc_groupe;
-
-        anovaResults.(matlab.lang.makeValidName(varName)) = resNP;
+    if isempty(yName)
+        warning('Variable non trouvée dans la table (label: "%s").', label);
+        failed_analyses{end+1} = label; 
         continue;
     end
 
-    % =========================================================
-    % ===============  CAS PARAMÉTRIQUE  ======================
-    % =========================================================
     try
-        fprintf('➡️ Analyse PARAMÉTRIQUE (ANOVA mixte)\n');
-        
-        % Design intra-sujet
-        within = table(categorical({'Plat'; 'Medium'; 'High'}), 'VariableNames', {'Surface'});
+        % Préparer les données (enlever NaN)
+        cols = {'Participant','AgeGroup','Surface', yName};
+        data_clean = DATA_all(:, cols);
+        data_clean = rmmissing(data_clean);
 
-        % Modèle à mesures répétées
-        rm = fitrm(T, 'Plat-High ~ Groupe', 'WithinDesign', within);
-
-        % ANOVA intra-sujet (Surface + Interaction)
-        ranovatbl = ranova(rm);
-        fprintf('\n--- Table ANOVA à mesures répétées ---\n');
-        disp(ranovatbl);
-        
-        % Test de sphéricité
-        statsSphericity = mauchly(rm);
-        fprintf('\n--- Test de sphéricité de Mauchly ---\n');
-        disp(statsSphericity);
-
-        % CORRECTION : ANOVA entre-sujets (Groupe)
-        betweenTbl = anova(rm);
-        fprintf('\n--- Table ANOVA entre-sujets ---\n');
-        disp(betweenTbl);
-
-        % CALCUL DES η² PARTIELS
-        
-        % --- η² pour Surface (intra-sujet) ---
-idxSurf = strcmp(ranovatbl.Properties.RowNames, '(Intercept):Surface');
-if any(idxSurf)
-    SS_surf = ranovatbl.SumSq(idxSurf);
-    idxErrSurf = find(idxSurf) + 1;
-    if idxErrSurf <= height(ranovatbl)
-        SS_err_surf = ranovatbl.SumSq(idxErrSurf);
-        eta2_surface = SS_surf / (SS_surf + SS_err_surf);
-    else
-        eta2_surface = NaN;
-    end
-    pSurface = ranovatbl.pValueGG(idxSurf);
-else
-    eta2_surface = NaN;
-    pSurface = NaN;
-end
-
-% --- η² pour Interaction ---
-idxInt = strcmp(ranovatbl.Properties.RowNames, 'Groupe:Surface');
-if any(idxInt)
-    SS_int = ranovatbl.SumSq(idxInt);
-    idxErrInt = find(idxInt) + 1;
-    if idxErrInt <= height(ranovatbl)
-        SS_err_int = ranovatbl.SumSq(idxErrInt);
-        eta2_interaction = SS_int / (SS_int + SS_err_int);
-    else
-        eta2_interaction = NaN;
-    end
-    pInteraction = ranovatbl.pValueGG(idxInt);
-else
-    eta2_interaction = NaN;
-    pInteraction = NaN;
-end
-
-% --- η² pour Groupe (entre-sujets) ---
-pGroup = NaN;
-eta2_group = NaN;
-
-% La colonne s'appelle 'Between'
-if ismember('Between', betweenTbl.Properties.VariableNames)
-    % CORRECTION : Between est categorical, pas cell
-    % Conversion en string pour comparaison
-    betweenValues = string(betweenTbl.Between);
-    
-    % Recherche des lignes (case-insensitive)
-    idxG = strcmpi(betweenValues, 'Groupe');
-    idxErr = strcmpi(betweenValues, 'Error');
-    
-    if any(idxG) && any(idxErr)
-        SS_group = betweenTbl.SumSq(idxG);
-        SS_err_group = betweenTbl.SumSq(idxErr);
-        eta2_group = SS_group / (SS_group + SS_err_group);
-        pGroup = betweenTbl.pValue(idxG);
-    else
-        warning('Lignes Groupe ou Error introuvables dans betweenTbl pour %s', varName);
-    end
-elseif ismember('Source', betweenTbl.Properties.VariableNames)
-    % Anciennes versions MATLAB
-    sourceValues = string(betweenTbl.Source);
-    idxG = strcmpi(sourceValues, 'Groupe');
-    idxErr = strcmpi(sourceValues, 'Error');
-    
-    if any(idxG) && any(idxErr)
-        SS_group = betweenTbl.SumSq(idxG);
-        SS_err_group = betweenTbl.SumSq(idxErr);
-        eta2_group = SS_group / (SS_group + SS_err_group);
-        pGroup = betweenTbl.pValue(idxG);
-    end
-else
-    % Fallback : extraction par indices de ligne
-    if height(betweenTbl) >= 3
-        SS_group = betweenTbl.SumSq(2);      % Ligne 2 = Groupe
-        SS_err_group = betweenTbl.SumSq(3);  % Ligne 3 = Error
-        pGroup = betweenTbl.pValue(2);
-        eta2_group = SS_group / (SS_group + SS_err_group);
-    else
-        warning('Structure betweenTbl inconnue pour %s', varName);
-    end
-end
-
-        fprintf('\n--- Tailles d''effet (η² partiel) ---\n');
-        fprintf('Groupe     : η² = %.4f (p = %.4f)\n', eta2_group, pGroup);
-        fprintf('Surface    : η² = %.4f (p = %.4f)\n', eta2_surface, pSurface);
-        fprintf('Interaction: η² = %.4f (p = %.4f)\n', eta2_interaction, pInteraction);
-
-        % POST-HOCS
-        
-        % Post-hoc Surface
-        posthoc_surface = [];
-        if pSurface < 0.05
-            fprintf('\n--- Post-hoc Surface (comparaisons par paires) ---\n');
-            posthoc_surface = multcompare(rm, 'Surface');
-            disp(posthoc_surface);
+        if height(data_clean) < 30
+            warning('Pas assez de données pour: %s (n=%d)', label, height(data_clean));
+            failed_analyses{end+1} = label; 
+            continue;
         end
 
-        % Post-hoc Interaction
-        posthoc_interaction = [];
-        if pInteraction < 0.05
-            fprintf('\n--- Post-hoc Interaction (Surface × Groupe) ---\n');
-            posthoc_interaction = multcompare(rm, 'Surface', 'By', 'Groupe');
-            disp(posthoc_interaction);
-        end
+        % Ajuster le modèle LMM
+        [lmm_results, lme, model_meta] = fit_lmm_model(data_clean, yName, FIT_METHOD, DF_METHOD);
 
-        % Post-hoc Groupe
-        posthoc_groupe = [];
-        if pGroup < 0.05
-            fprintf('\n--- Post-hoc Groupe (comparaisons par paires) ---\n');
-            meanAcross = mean(T{:, {'Plat','Medium','High'}}, 2);
-            [~, ~, statsGroup] = anova1(meanAcross, T.Groupe, 'off');
-            posthoc_groupe = multcompare(statsGroup, 'Display', 'off');
-            disp(posthoc_groupe);
-        end
+        % Diagnostics
+        assumptions = check_lmm_assumptions(lme);
 
-        % STOCKAGE STRUCTURÉ
-        res = struct();
-        res.analysisType = 'parametric';
-        res.dataWide     = T;
-        res.meta.groupsOrder   = groupList;
-        res.meta.surfacesOrder = Condition;
-        res.descriptives = descriptives;
-        res.ranova       = ranovatbl;
-        res.rm           = rm;
-        res.sphericity   = statsSphericity;
-        res.between      = betweenTbl;
+        % Stocker les résultats détaillés
+        safe_field = matlab.lang.makeValidName(yName);
+        detailed_results.(safe_field) = struct( ...
+            'Label',       label, ...
+            'YName',       yName, ...
+            'Model',       lme, ...
+            'ModelMeta',   model_meta, ...
+            'Results',     lmm_results, ...
+            'Assumptions', assumptions);
 
-        % Surface
-        res.surface.test    = 'RM-ANOVA';
-        res.surface.p       = pSurface;
-        res.surface.eta2    = eta2_surface;
-        res.surface.posthoc = posthoc_surface;
+        % Ajouter au résumé
+        new_row = table();
+        new_row.Label   = {label};
+        new_row.YName   = {yName};
+        new_row.N_obs   = height(data_clean);
 
-        % Interaction
-        res.interaction.test    = 'RM-ANOVA';
-        res.interaction.p       = pInteraction;
-        res.interaction.eta2    = eta2_interaction;
-        res.interaction.posthoc = posthoc_interaction;
+        new_row.Surface_F   = lmm_results.Surface.F;
+        new_row.Surface_DF1 = lmm_results.Surface.DF1;
+        new_row.Surface_DF2 = lmm_results.Surface.DF2;
+        new_row.Surface_p   = lmm_results.Surface.p;
+        new_row.Surface_sig = {get_sig_stars(lmm_results.Surface.p)};
 
-        % Groupe
-        res.group.test    = 'Between-subjects ANOVA';
-        res.group.p       = pGroup;
-        res.group.eta2    = eta2_group;
-        res.group.posthoc = posthoc_groupe;
+        new_row.AgeGroup_F   = lmm_results.AgeGroup.F;
+        new_row.AgeGroup_DF1 = lmm_results.AgeGroup.DF1;
+        new_row.AgeGroup_DF2 = lmm_results.AgeGroup.DF2;
+        new_row.AgeGroup_p   = lmm_results.AgeGroup.p;
+        new_row.AgeGroup_sig = {get_sig_stars(lmm_results.AgeGroup.p)};
 
-        anovaResults.(matlab.lang.makeValidName(varName)) = res;
+        new_row.Interaction_F   = lmm_results.Interaction.F;
+        new_row.Interaction_DF1 = lmm_results.Interaction.DF1;
+        new_row.Interaction_DF2 = lmm_results.Interaction.DF2;
+        new_row.Interaction_p   = lmm_results.Interaction.p;
+        new_row.Interaction_sig = {get_sig_stars(lmm_results.Interaction.p)};
+
+        new_row.AIC = lmm_results.AIC;
+        new_row.BIC = lmm_results.BIC;
+        new_row.LogLik = lmm_results.LogLikelihood;
+
+        % Métadonnées LMM
+        new_row.FitMethod = {model_meta.FitMethod};
+        new_row.DFMethod  = {model_meta.DFMethod};
+
+        results_summary = [results_summary; new_row]; %#ok<AGROW>
 
     catch ME
-        fprintf('⚠️ Erreur pour %s : %s\n', varName, ME.message);
-        fprintf('   Stack: %s\n', ME.stack(1).name);
-        continue;
-    end
-
-end % fin boucle variables
-
-%% SAUVEGARDE
-save(fullfile(save_path, 'ANOVA_Results.mat'), 'anovaResults');
-fprintf('\n✅ Résultats sauvegardés : %s\n', fullfile(save_path, 'ANOVA_Results.mat'));
-
-%% EXPORT CSV RÉCAPITULATIF
-fprintf('\n=== GÉNÉRATION DU TABLEAU RÉCAPITULATIF ===\n');
-
-varNames = fieldnames(anovaResults);
-recapTable = table();
-
-for i = 1:length(varNames)
-    varName = varNames{i};
-    
-    % Initialisation
-    testUsed = 'Unknown';
-    pGroup = NaN; eta2Group = NaN; starsGroup = '';
-    pSurface = NaN; eta2Surface = NaN; starsSurface = '';
-    pInteraction = NaN; eta2Interaction = NaN; starsInteraction = '';
-
-    resVar = anovaResults.(varName);
-
-    if isfield(resVar, 'analysisType')
-        if strcmp(resVar.analysisType, 'parametric')
-            testUsed = 'Parametric (Mixed ANOVA)';
-            
-            % Groupe
-            if isfield(resVar, 'group')
-                pGroup = resVar.group.p;
-                eta2Group = resVar.group.eta2;
-                starsGroup = repmat('*', 1, sum(pGroup < [0.05 0.01 0.001]));
-            end
-            
-            % Surface
-            if isfield(resVar, 'surface')
-                pSurface = resVar.surface.p;
-                eta2Surface = resVar.surface.eta2;
-                starsSurface = repmat('*', 1, sum(pSurface < [0.05 0.01 0.001]));
-            end
-            
-            % Interaction
-            if isfield(resVar, 'interaction')
-                pInteraction = resVar.interaction.p;
-                eta2Interaction = resVar.interaction.eta2;
-                starsInteraction = repmat('*', 1, sum(pInteraction < [0.05 0.01 0.001]));
-            end
-            
-        elseif strcmp(resVar.analysisType, 'nonparametric')
-            testUsed = 'Non-parametric';
-            
-            % Groupe
-            if isfield(resVar, 'group')
-                pGroup = resVar.group.p;
-                starsGroup = repmat('*', 1, sum(pGroup < [0.05 0.01 0.001]));
-            end
-            
-            % Surface
-            if isfield(resVar, 'surface')
-                pSurface = resVar.surface.p;
-                starsSurface = repmat('*', 1, sum(pSurface < [0.05 0.01 0.001]));
-            end
-        end
-    end
-
-    % Ajout au tableau récapitulatif
-    recapTable = [recapTable; table( ...
-        {strrep(varName,'_',' ')}, ...
-        {testUsed}, ...
-        pGroup, {starsGroup}, eta2Group, ...
-        pSurface, {starsSurface}, eta2Surface, ...
-        pInteraction, {starsInteraction}, eta2Interaction, ...
-        'VariableNames', {'Variable', 'Test', ...
-                          'p_Groupe', 'Stars_Groupe', 'Eta2_Groupe', ...
-                          'p_Surface', 'Stars_Surface', 'Eta2_Surface', ...
-                          'p_Interaction', 'Stars_Interaction', 'Eta2_Interaction'})]; %#ok<AGROW>
-end
-
-% Export CSV
-outputDir = fullfile(save_path, 'Anova_Recap');
-if ~exist(outputDir, 'dir'); mkdir(outputDir); end
-
-csvFilePath = fullfile(outputDir, 'ANOVA_Recap_Global.csv');
-writetable(recapTable, csvFilePath);
-
-fprintf('\n=== RÉSUMÉ FINAL ===\n');
-fprintf('✅ Analyses ANOVA réalisées pour %d variables\n', length(varNames));
-fprintf('✅ Tableau récapitulatif exporté : %s\n', csvFilePath);
-fprintf('\n📊 Variables significatives (p < 0.05) :\n');
-
-% Affichage des résultats significatifs
-for i = 1:height(recapTable)
-    if recapTable.p_Groupe(i) < 0.05 || recapTable.p_Surface(i) < 0.05 || recapTable.p_Interaction(i) < 0.05
-        fprintf('  • %s\n', recapTable.Variable{i});
-        if recapTable.p_Groupe(i) < 0.05
-            fprintf('    - Groupe: p=%.4f, η²=%.3f %s\n', ...
-                recapTable.p_Groupe(i), recapTable.Eta2_Groupe(i), recapTable.Stars_Groupe{i});
-        end
-        if recapTable.p_Surface(i) < 0.05
-            fprintf('    - Surface: p=%.4f, η²=%.3f %s\n', ...
-                recapTable.p_Surface(i), recapTable.Eta2_Surface(i), recapTable.Stars_Surface{i});
-        end
-        if recapTable.p_Interaction(i) < 0.05
-            fprintf('    - Interaction: p=%.4f, η²=%.3f %s\n', ...
-                recapTable.p_Interaction(i), recapTable.Eta2_Interaction(i), recapTable.Stars_Interaction{i});
-        end
+        warning('Erreur pour "%s" (Y="%s"): %s', label, yName, ME.message);
+        failed_analyses{end+1} = label;
     end
 end
 
-disp('✅ Analyse terminée !');
+%% =============== Correction comparaisons multiples (FDR) ===============
+fprintf('\n=== CORRECTION POUR COMPARAISONS MULTIPLES (FDR) ===\n');
+
+% Architecture FDR:
+% - FDR appliquée séparément pour chaque famille d'effets, à travers les variables:
+%   (i) Surface p-values, (ii) AgeGroup p-values, (iii) Interaction p-values
+if ~isempty(results_summary)
+    results_summary = apply_fdr_correction(results_summary);
+
+    n_sig_surface = sum(results_summary.Surface_p_FDR < 0.05, 'omitnan');
+    n_sig_age     = sum(results_summary.AgeGroup_p_FDR < 0.05, 'omitnan');
+    n_sig_inter   = sum(results_summary.Interaction_p_FDR < 0.05, 'omitnan');
+
+    fprintf('Effets significatifs après correction FDR (par famille d''effets):\n');
+    fprintf('  Surface: %d/%d (%.1f%%)\n', n_sig_surface, height(results_summary), 100*n_sig_surface/height(results_summary));
+    fprintf('  Groupe d''âge: %d/%d (%.1f%%)\n', n_sig_age, height(results_summary), 100*n_sig_age/height(results_summary));
+    fprintf('  Interaction: %d/%d (%.1f%%)\n', n_sig_inter, height(results_summary), 100*n_sig_inter/height(results_summary));
+
+for i = 1:height(results_summary)
+
+    % récupérer la variable
+    yName = results_summary.YName{i};
+    label = results_summary.Label{i};
+
+    % reconstruire les données
+    data_plot = DATA_all(:, {'Participant','AgeGroup','Surface', yName});
+    data_plot = rmmissing(data_plot);
+
+    % construire une structure p-values pour la figure
+    pvals_fig = struct();
+    pvals_fig.Surface_p      = results_summary.Surface_p(i);
+    pvals_fig.Surface_p_FDR  = results_summary.Surface_p_FDR(i);
+    pvals_fig.AgeGroup_p     = results_summary.AgeGroup_p(i);
+    pvals_fig.AgeGroup_p_FDR = results_summary.AgeGroup_p_FDR(i);
+    pvals_fig.Inter_p        = results_summary.Interaction_p(i);
+    pvals_fig.Inter_p_FDR    = results_summary.Interaction_p_FDR(i);
+
+    plot_lmm_results(data_plot, yName, label, pvals_fig, stats_path);
+end
+
+else
+    warning('Aucun résultat dans results_summary (tout a échoué ou aucune variable trouvée).');
+end
+
+%% =============== Exports ===============
+fprintf('\n=== EXPORT DES RÉSULTATS ===\n');
+
+writetable(results_summary, fullfile(stats_path, 'LMM_Summary.csv'));
+fprintf('✓ Tableau récapitulatif exporté (CSV)\n');
+
+save(fullfile(stats_path, 'Detailed_LMM_Results.mat'), 'detailed_results');
+fprintf('✓ Résultats détaillés sauvegardés (.mat)\n');
+
+generate_lmm_report(results_summary, detailed_results, failed_analyses, stats_path, surfaces, groups);
+fprintf('✓ Rapport texte généré\n');
+
+export_to_excel(results_summary, stats_path);
+fprintf('✓ Rapport Excel exporté\n');
+
+fprintf('\nANALYSES TERMINÉES.\n');
+fprintf('Résultats dans: %s\n', stats_path);
+fprintf('Variables analysées: %d/%d\n', height(results_summary), numel(variables_to_test));
+if ~isempty(failed_analyses)
+    fprintf('Analyses échouées: %d\n', numel(failed_analyses));
+end
+
+%% ========================= FONCTIONS LOCALES =========================
+
+function yName = resolve_varname(label, tableVarNames)
+    yName = '';
+
+    if any(strcmp(tableVarNames, label))
+        yName = label; return;
+    end
+
+    cand = matlab.lang.makeValidName(label);
+    if any(strcmp(tableVarNames, cand))
+        yName = cand; return;
+    end
+
+    clean = @(s) lower(regexprep(s, '[^a-zA-Z0-9]+', ''));
+    label_c = clean(label);
+
+    tv = tableVarNames;
+    tv_clean = cellfun(clean, tv, 'UniformOutput', false);
+
+    idx = find(strcmp(tv_clean, label_c), 1);
+    if ~isempty(idx)
+        yName = tv{idx}; return;
+    end
+
+    idx = find(contains(tv_clean, label_c), 1);
+    if ~isempty(idx)
+        yName = tv{idx}; return;
+    end
+end
+
+function [lmm_results, lme, meta] = fit_lmm_model(data, yName, fitMethod, dfMethod)
+% - FitMethod: 'REML' ou 'ML'
+% - DFMethod:  'Satterthwaite' (si supporté) sinon fallback 'Residual'
+% - Interaction testée via coefTest -> pas de NaN
+
+    if nargin < 3 || isempty(fitMethod), fitMethod = 'REML'; end
+    if nargin < 4 || isempty(dfMethod),  dfMethod  = 'Satterthwaite'; end
+
+    data.Y = data.(yName);
+
+    formula = 'Y ~ Surface * AgeGroup + (1|Participant)';
+    lme = fitlme(data, formula, 'FitMethod', fitMethod);
+
+    % DFMethod: fallback si non supporté
+    try
+        anova_tbl = anova(lme, 'DFMethod', dfMethod);
+        dfMethodUsed = dfMethod;
+    catch
+        anova_tbl = anova(lme, 'DFMethod', 'Residual');
+        dfMethodUsed = 'Residual';
+        warning('DFMethod "%s" non supporté -> utilisation de "Residual".', dfMethod);
+    end
+
+    meta = struct('Formula', formula, 'FitMethod', fitMethod, 'DFMethod', dfMethodUsed);
+
+    lmm_results = struct();
+
+    function out = getTerm(termName)
+        idx = find(strcmp(anova_tbl.Term, termName), 1);
+        if isempty(idx)
+            out = struct('F', NaN, 'p', NaN, 'DF1', NaN, 'DF2', NaN);
+        else
+            out = struct( ...
+                'F',   anova_tbl.FStat(idx), ...
+                'p',   anova_tbl.pValue(idx), ...
+                'DF1', anova_tbl.DF1(idx), ...
+                'DF2', anova_tbl.DF2(idx));
+        end
+    end
+
+    % Effets principaux
+    lmm_results.Surface  = getTerm('Surface');
+    lmm_results.AgeGroup = getTerm('AgeGroup');
+
+    % Interaction: test global via coefTest (Wald F-test)
+    betaNames = string(lme.CoefficientNames);
+    idxInter = contains(betaNames, 'Surface') & contains(betaNames, ':') & contains(betaNames, 'AgeGroup');
+
+    if any(idxInter)
+        cols = find(idxInter);
+        L = zeros(numel(cols), numel(betaNames));
+        for k = 1:numel(cols)
+            L(k, cols(k)) = 1;
+        end
+
+        [pInt, FInt, df1Int, df2Int] = coefTest(lme, L);
+        lmm_results.Interaction = struct('F', FInt, 'p', pInt, 'DF1', df1Int, 'DF2', df2Int);
+    else
+        lmm_results.Interaction = struct('F', NaN, 'p', NaN, 'DF1', NaN, 'DF2', NaN);
+        warning('Aucun coefficient d''interaction Surface:AgeGroup détecté dans lme.CoefficientNames.');
+    end
+
+    % Critères d'information
+    lmm_results.AIC = lme.ModelCriterion.AIC;
+    lmm_results.BIC = lme.ModelCriterion.BIC;
+    lmm_results.LogLikelihood = lme.LogLikelihood;
+
+    % Affichage
+    fprintf('  Surface: F(%g,%g)=%.3f, p=%.4f %s\n', ...
+        lmm_results.Surface.DF1, lmm_results.Surface.DF2, ...
+        lmm_results.Surface.F, lmm_results.Surface.p, get_sig_stars(lmm_results.Surface.p));
+
+    fprintf('  AgeGroup: F(%g,%g)=%.3f, p=%.4f %s\n', ...
+        lmm_results.AgeGroup.DF1, lmm_results.AgeGroup.DF2, ...
+        lmm_results.AgeGroup.F, lmm_results.AgeGroup.p, get_sig_stars(lmm_results.AgeGroup.p));
+
+    fprintf('  Interaction: F(%g,%g)=%.3f, p=%.4f %s\n', ...
+        lmm_results.Interaction.DF1, lmm_results.Interaction.DF2, ...
+        lmm_results.Interaction.F, lmm_results.Interaction.p, get_sig_stars(lmm_results.Interaction.p));
+end
+
+function assumptions = check_lmm_assumptions(lme)
+    assumptions = struct();
+
+    residuals = lme.Residuals.Raw;
+
+    [h_ks, p_ks] = kstest(zscore(residuals));
+    assumptions.normality.test = 'Kolmogorov-Smirnov';
+    assumptions.normality.p    = p_ks;
+    assumptions.normality.ok   = (h_ks == 0);
+
+    fitted = lme.Fitted;
+    [~, p_h] = corr(abs(residuals), fitted, 'type', 'Spearman', 'rows', 'complete');
+    assumptions.homoscedasticity.test = 'abs(resid) vs fitted (Spearman)';
+    assumptions.homoscedasticity.p    = p_h;
+    assumptions.homoscedasticity.ok   = (p_h > 0.05);
+
+    std_resid = residuals ./ std(residuals);
+    n_out = sum(abs(std_resid) > 3);
+    assumptions.outliers.n       = n_out;
+    assumptions.outliers.percent = 100 * n_out / numel(residuals);
+    assumptions.outliers.ok      = (assumptions.outliers.percent < 5);
+
+    fprintf('  Assumptions:\n');
+    fprintf('    Normalité: p=%.4f %s\n', p_ks, okfail(assumptions.normality.ok));
+    fprintf('    Homoscédasticité: p=%.4f %s\n', p_h, okfail(assumptions.homoscedasticity.ok));
+    fprintf('    Outliers: %.1f%% %s\n', assumptions.outliers.percent, okfail(assumptions.outliers.ok));
+end
+
+function s = okfail(tf)
+    if tf, s = 'OK'; else, s = 'FAIL'; end
+end
+
+function plot_lmm_results(data, yName, label, pvals, save_path)
+    surfCats  = categories(data.Surface);
+    groupCats = categories(data.AgeGroup);
+
+    fig = figure('Position', [100, 100, 1400, 500]);
+
+    subplot(1,3,1);
+    means = zeros(numel(surfCats), 1);
+    sems  = zeros(numel(surfCats), 1);
+    for i = 1:numel(surfCats)
+        idx = (data.Surface == surfCats{i});
+        vals = data{idx, yName};
+        means(i) = mean(vals, 'omitnan');
+        sems(i)  = std(vals, 'omitnan') / sqrt(sum(~isnan(vals)));
+    end
+    bar(means); hold on;
+    errorbar(1:numel(surfCats), means, sems, 'k.', 'LineWidth', 1.5);
+    set(gca, 'XTickLabel', surfCats);
+    ylabel(label, 'Interpreter','none');
+    title(sprintf('Surface: p = %.4f | p_{FDR} = %.4f', pvals.Surface_p, pvals.Surface_p_FDR), 'Interpreter','tex');
+    grid on;
+
+    subplot(1,3,2);
+    means = zeros(numel(groupCats), 1);
+    sems  = zeros(numel(groupCats), 1);
+    for i = 1:numel(groupCats)
+        idx = (data.AgeGroup == groupCats{i});
+        vals = data{idx, yName};
+        means(i) = mean(vals, 'omitnan');
+        sems(i)  = std(vals, 'omitnan') / sqrt(sum(~isnan(vals)));
+    end
+    bar(means); hold on;
+    errorbar(1:numel(groupCats), means, sems, 'k.', 'LineWidth', 1.5);
+    set(gca, 'XTickLabel', groupCats, 'XTickLabelRotation', 45);
+    ylabel(label, 'Interpreter','none');
+    title(sprintf('AgeGroup: p = %.4f | p_{FDR} = %.4f', pvals.AgeGroup_p, pvals.AgeGroup_p_FDR), 'Interpreter','tex');
+    grid on;
+
+    subplot(1,3,3);
+    for g = 1:numel(groupCats)
+        mg = zeros(numel(surfCats), 1);
+        for s = 1:numel(surfCats)
+            idx = (data.Surface == surfCats{s}) & (data.AgeGroup == groupCats{g});
+            mg(s) = mean(data{idx, yName}, 'omitnan');
+        end
+        plot(1:numel(surfCats), mg, '-o', 'LineWidth', 2, 'DisplayName', char(groupCats{g}));
+        hold on;
+    end
+    set(gca, 'XTick', 1:numel(surfCats), 'XTickLabel', surfCats);
+    ylabel(label, 'Interpreter','none');
+    title(sprintf('Interaction: p = %.4f | p_{FDR} = %.4f', pvals.Inter_p, pvals.Inter_p_FDR), 'Interpreter','tex');
+    legend('Location','best'); grid on;
+
+    safe_name = matlab.lang.makeValidName(yName);
+    saveas(fig, fullfile(save_path, ['Plot_' safe_name '.png']));
+    close(fig);
+end
+
+function results_summary = apply_fdr_correction(results_summary)
+% FDR Benjamini-Hochberg, appliqué séparément par famille d'effets:
+% - Surface_p (toutes les variables)
+% - AgeGroup_p (toutes les variables)
+% - Interaction_p (toutes les variables)
+
+    [~, ~, ~, pS] = fdr_bh(results_summary.Surface_p);
+    results_summary.Surface_p_FDR = pS;
+    results_summary.Surface_sig_FDR = cellfun(@get_sig_stars, num2cell(pS), 'UniformOutput', false);
+
+    [~, ~, ~, pG] = fdr_bh(results_summary.AgeGroup_p);
+    results_summary.AgeGroup_p_FDR = pG;
+    results_summary.AgeGroup_sig_FDR = cellfun(@get_sig_stars, num2cell(pG), 'UniformOutput', false);
+
+    [~, ~, ~, pI] = fdr_bh(results_summary.Interaction_p);
+    results_summary.Interaction_p_FDR = pI;
+    results_summary.Interaction_sig_FDR = cellfun(@get_sig_stars, num2cell(pI), 'UniformOutput', false);
+end
+
+function [h, crit_p, adj_ci_cvrg, adj_p] = fdr_bh(pvals, q, ~, ~)
+    if nargin < 2, q = 0.05; end
+
+    p = pvals(:);
+    m = numel(p);
+
+    [ps, idx] = sort(p);
+    thresh = (1:m)' * q / m;
+
+    below = ps <= thresh;
+    if any(below)
+        k = find(below, 1, 'last');
+        crit_p = ps(k);
+        h = p <= crit_p;
+    else
+        crit_p = 0;
+        h = false(m,1);
+    end
+
+    % adjusted p-values (BH)
+    adj_sorted = ps .* m ./ (1:m)';
+    adj_sorted = flipud(cummin(flipud(adj_sorted)));
+    adj_sorted(adj_sorted > 1) = 1;
+
+    adj_p = nan(m,1);
+    adj_p(idx) = adj_sorted;
+
+    adj_ci_cvrg = NaN;
+end
+
+function stars = get_sig_stars(p)
+    if isnan(p)
+        stars = 'na';
+    elseif p < 0.001
+        stars = '***';
+    elseif p < 0.01
+        stars = '**';
+    elseif p < 0.05
+        stars = '*';
+    else
+        stars = 'ns';
+    end
+end
+
+function generate_lmm_report(results_summary, detailed_results, failed_analyses, stats_path, surfaces, groups)
+    fid = fopen(fullfile(stats_path, 'LMM_Statistical_Report.txt'), 'w');
+    if fid < 0
+        warning('Impossible de créer le rapport texte.');
+        return;
+    end
+
+    fprintf(fid, "========================================================\n");
+    fprintf(fid, "RAPPORT STATISTIQUE - MODÈLES LINÉAIRES MIXTES (LMM)\n");
+    fprintf(fid, "========================================================\n\n");
+    fprintf(fid, "Date: %s\n\n", datestr(now));
+
+    fprintf(fid, "DESIGN:\n");
+    fprintf(fid, "  Surface (répétée): %s\n", strjoin(surfaces, ', '));
+    fprintf(fid, "  Groupe d'âge (inter-sujets): %s\n\n", strjoin(groups, ', '));
+
+    fprintf(fid, "MODÈLE (fixé):\n");
+    fprintf(fid, "  Y ~ Surface * AgeGroup + (1|Participant)\n\n");
+
+    % Méta (FitMethod / DFMethod) si dispo
+    fns = fieldnames(detailed_results);
+    if ~isempty(fns) && isfield(detailed_results.(fns{1}), 'ModelMeta')
+        MM = detailed_results.(fns{1}).ModelMeta;
+        fprintf(fid, "ESTIMATION / DF:\n");
+        fprintf(fid, "  FitMethod: %s\n", MM.FitMethod);
+        fprintf(fid, "  DFMethod:  %s\n\n", MM.DFMethod);
+    end
+
+    fprintf(fid, "MULTIPLE TESTING:\n");
+    fprintf(fid, "  Benjamini–Hochberg FDR applied across outcomes separately for each effect family:\n");
+    fprintf(fid, "   - Surface p-values (one per outcome)\n");
+    fprintf(fid, "   - AgeGroup p-values (one per outcome)\n");
+    fprintf(fid, "   - Surface×AgeGroup interaction p-values (one per outcome)\n\n");
+
+    fprintf(fid, "SEUIL:\n");
+    fprintf(fid, "  alpha = 0.05\n\n");
+
+    fprintf(fid, "========================================================\n");
+    fprintf(fid, "RÉSULTATS (résumé)\n");
+    fprintf(fid, "========================================================\n\n");
+
+    hasFDR = ismember('Surface_p_FDR', results_summary.Properties.VariableNames);
+
+    for i = 1:height(results_summary)
+        fprintf(fid, "%d) %s\n", i, results_summary.Label{i});
+        fprintf(fid, "   YName: %s\n", results_summary.YName{i});
+        fprintf(fid, "   N: %d\n", results_summary.N_obs(i));
+
+        fprintf(fid, "   Surface:     F(%g,%g)=%.3f, p=%.4f %s\n", ...
+            results_summary.Surface_DF1(i), results_summary.Surface_DF2(i), ...
+            results_summary.Surface_F(i), results_summary.Surface_p(i), ...
+            results_summary.Surface_sig{i});
+
+        fprintf(fid, "   AgeGroup:    F(%g,%g)=%.3f, p=%.4f %s\n", ...
+            results_summary.AgeGroup_DF1(i), results_summary.AgeGroup_DF2(i), ...
+            results_summary.AgeGroup_F(i), results_summary.AgeGroup_p(i), ...
+            results_summary.AgeGroup_sig{i});
+
+        fprintf(fid, "   Interaction: F(%g,%g)=%.3f, p=%.4f %s\n", ...
+            results_summary.Interaction_DF1(i), results_summary.Interaction_DF2(i), ...
+            results_summary.Interaction_F(i), results_summary.Interaction_p(i), ...
+            results_summary.Interaction_sig{i});
+
+        if hasFDR
+            fprintf(fid, "   FDR: Surface p=%.4f (%s), AgeGroup p=%.4f (%s), Interaction p=%.4f (%s)\n", ...
+                results_summary.Surface_p_FDR(i), results_summary.Surface_sig_FDR{i}, ...
+                results_summary.AgeGroup_p_FDR(i), results_summary.AgeGroup_sig_FDR{i}, ...
+                results_summary.Interaction_p_FDR(i), results_summary.Interaction_sig_FDR{i});
+        end
+
+        fprintf(fid, "   Fit: AIC=%.2f, BIC=%.2f, LogLik=%.2f\n\n", ...
+            results_summary.AIC(i), results_summary.BIC(i), results_summary.LogLik(i));
+    end
+
+    if ~isempty(failed_analyses)
+        fprintf(fid, "========================================================\n");
+        fprintf(fid, "VARIABLES ÉCHOUÉES / NON TROUVÉES\n");
+        fprintf(fid, "========================================================\n");
+        for k = 1:numel(failed_analyses)
+            fprintf(fid, "- %s\n", failed_analyses{k});
+        end
+        fprintf(fid, "\n");
+    end
+
+    % Diagnostics
+    fprintf(fid, "========================================================\n");
+    fprintf(fid, "DIAGNOSTICS (aperçu)\n");
+    fprintf(fid, "========================================================\n");
+    for k = 1:numel(fns)
+        S = detailed_results.(fns{k});
+        if isfield(S, 'Assumptions')
+            A = S.Assumptions;
+            fprintf(fid, "- %s:\n", S.Label);
+            fprintf(fid, "   Normalité (KS) p=%.4f (%s)\n", A.normality.p, okfail(A.normality.ok));
+            fprintf(fid, "   Homoscédasticité p=%.4f (%s)\n", A.homoscedasticity.p, okfail(A.homoscedasticity.ok));
+            fprintf(fid, "   Outliers: %.1f%% (%s)\n", A.outliers.percent, okfail(A.outliers.ok));
+        end
+    end
+
+    fclose(fid);
+end
+
+function export_to_excel(results_summary, stats_path)
+    excel_file = fullfile(stats_path, 'LMM_Results_Complete.xlsx');
+
+    writetable(results_summary, excel_file, 'Sheet', 'Summary');
+
+    sig_mask = results_summary.Surface_p < 0.05 | results_summary.AgeGroup_p < 0.05 | results_summary.Interaction_p < 0.05;
+    if any(sig_mask)
+        writetable(results_summary(sig_mask,:), excel_file, 'Sheet', 'Significant_Only');
+    else
+        writetable(results_summary(1:min(1,height(results_summary)),:), excel_file, 'Sheet', 'Significant_Only');
+    end
+
+    model_cols = intersect({'Label','YName','AIC','BIC','LogLik','FitMethod','DFMethod'}, results_summary.Properties.VariableNames, 'stable');
+    writetable(results_summary(:, model_cols), excel_file, 'Sheet', 'Model_Fit');
+end
