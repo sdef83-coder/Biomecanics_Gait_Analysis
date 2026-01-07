@@ -1,19 +1,24 @@
-%% LMM SUR LES PARAMÈTRES SPATIO-TEMPOREL - VERSION OPTIMISÉE
-% Facteur 1: Groupe d'âge (between-subject)
-% Facteur 2: Surface (within-subject, via (1|Participant))
+%% LMM Surface x Groupe (standard littérature) - robuste aux tailles inégales et données manquantes
+% Design:
+%   - Groupe (between-subject) : JeunesEnfants, Enfants, Adolescents, Adultes
+%   - Surface (within-subject) : Plat, Medium, High
+% Modèle principal (standard) :
+%   Y ~ Groupe*Surface + (1|Participant)
+% Option recommandée :
+%   comparer avec Y ~ Groupe*Surface + (1 + Surface|Participant)
+% Post-hoc (standard) :
+%   estimated marginal means (EMMs) + contrasts + correction 
 
 clc; clear; close all;
 
 cd('C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\result');
 addpath(genpath('C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\functions'));
 
-save_path = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\result\Statistics_LMM';
+save_path = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\result\Statistics_LMM_STANDARD';
 if ~exist(save_path, 'dir'); mkdir(save_path); end
 
-% Charger les données
 load('SpatioTemporalDATA.mat');
 
-% Variables à analyser
 variablesToAnalyze = {
     % --- Moyennes spatio-temporelles ---
     'Mean_Single support time (%)'
@@ -59,6 +64,12 @@ variablesToAnalyze = {
     'Mean_MoS AP Stance (%L0)'
     'Mean_MoS ML Stance (%L0)'
 
+    % --- Smoothness ---
+    'Mean_COM SPARC Magnitude (ua)'
+    'Mean_COM LDLJ Magnitude (ua)'
+    'Mean_STERN SPARC Magnitude (ua)'
+    'Mean_STERN LDLJ Magnitude (ua)'
+
     % --- Indices de symétrie ---
     'SI_Stride time (s)'
     'SI_Stride length (m)'
@@ -74,591 +85,748 @@ variablesToAnalyze = {
     'SI_Norm StepWidth (ua)'
 };
 
-% Groupes et surfaces
-groupList = {'JeunesEnfants', 'Enfants', 'Adolescents', 'Adultes'};
-Condition = {'Plat', 'Medium', 'High'};
-
-% Structures de sortie
-anovaResultsLMM = struct();
-recapTable = table();
-posthocLMM = table();
+groupList   = {'JeunesEnfants','Enfants','Adolescents','Adultes'};
+surfaceList = {'Plat','Medium','High'};
 
 alpha = 0.05;
 
-%% BOUCLE PRINCIPALE POUR CHAQUE VARIABLE
-for iVar = 1:length(variablesToAnalyze)
+resultsLMM = struct();
+recapTable = table();
+posthocAll = table();
+
+for iVar = 1:numel(variablesToAnalyze)
     varName = variablesToAnalyze{iVar};
-    fprintf('\n=== LMM POUR : %s ===\n', varName);
+    fprintf('\n====================================================\n');
+    fprintf('LMM (standard) pour : %s\n', varName);
+    fprintf('====================================================\n');
 
-    % ==============================
-    % 1. Construire la table wide
-    % ==============================
-    allData = [];
-    participantIDs = {};
-    groupLabels = {};
-    participantCounter = 1;
+    % =========================================================
+    % 1) Construire la table LONG en gardant toutes les obs dispo
+    % =========================================================
+    T_long = buildLongTableFromStruct(SpatioTemporalDATA, varName, groupList, surfaceList);
 
-    for g = 1:length(groupList)
-        groupName = groupList{g};
-
-        if isfield(SpatioTemporalDATA, groupName) && ...
-           isfield(SpatioTemporalDATA.(groupName), 'Plat')
-
-            groupTable = SpatioTemporalDATA.(groupName).Plat;
-            if ~isempty(groupTable) && any(strcmp(groupTable.Properties.VariableNames, varName))
-                participants = unique(groupTable.Participant);
-
-                for p = 1:length(participants)
-                    participantID = participants{p};
-                    participantData = [];
-                    validData = true;
-
-                    for iC = 1:length(Condition)
-                        cond = Condition{iC};
-                        if isfield(SpatioTemporalDATA.(groupName), cond)
-                            condTable = SpatioTemporalDATA.(groupName).(cond);
-
-                            if ~isempty(condTable) && any(strcmp(condTable.Properties.VariableNames, varName))
-                                participantRow = strcmp(condTable.Participant, participantID);
-                                if any(participantRow)
-                                    value = condTable.(varName)(participantRow);
-                                    if ~isempty(value) && ~isnan(value(1))
-                                        participantData(end+1) = value(1); %#ok<SAGROW>
-                                    else
-                                        validData = false; break;
-                                    end
-                                else
-                                    validData = false; break;
-                                end
-                            else
-                                validData = false; break;
-                            end
-                        else
-                            validData = false; break;
-                        end
-                    end
-
-                    if validData && length(participantData) == 3
-                        allData = [allData; participantData]; %#ok<AGROW>
-                        participantIDs{participantCounter,1} = participantID;
-                        groupLabels{participantCounter,1} = groupName;
-                        participantCounter = participantCounter + 1;
-                    end
-                end
-            end
-        end
-    end
-
-    nSubj = size(allData, 1);
-    fprintf('Participants avec données complètes : %d\n', nSubj);
-
-    if nSubj == 0
-        warning('Aucune donnée complète pour %s → variable ignorée.', varName);
+    if isempty(T_long) || height(T_long) < 6
+        warning('Pas assez de données pour %s → ignorée.', varName);
         continue;
     end
 
-    groupLabelsCat = categorical(groupLabels(:), groupList, 'Ordinal', true);
-    T_wide = table( ...
-        categorical(participantIDs(:)), ...
-        groupLabelsCat, ...
-        allData(:,1), ...
-        allData(:,2), ...
-        allData(:,3), ...
-        'VariableNames', {'Participant', 'Groupe', 'Plat', 'Medium', 'High'});
-
-    % ==============================
-    % 2. Construire le format long
-    % ==============================
-    T_long = table();
-    for iC = 1:length(Condition)
-        condName = Condition{iC};
-
-        tmp = table();
-        tmp.Participant = T_wide.Participant;
-        tmp.Groupe      = T_wide.Groupe;
-        tmp.Surface     = categorical( ...
-                               repmat({condName}, nSubj, 1), ...
-                               Condition, 'Ordinal', true);
-        tmp.Y           = T_wide.(condName);
-
-        T_long = [T_long; tmp]; %#ok<AGROW>
+    % Garde-fous simples (standard)
+    nSubj = numel(categories(T_long.Participant));
+    if nSubj < 6
+        warning('Trop peu de participants (%d) pour %s → ignorée.', nSubj, varName);
+        continue;
     end
 
-    fprintf('Nombre total d''observations : %d\n', height(T_long));
+    fprintf('Participants uniques : %d\n', nSubj);
+    fprintf('Observations totales : %d\n', height(T_long));
 
-    % ==============================
-    % 3. Ajuster le LMM
-    % ==============================
+    % =========================================================
+    % 2) Ajuster LMM - modèle standard + option random slope
+    % =========================================================
     try
-        lme = fitlme(T_long, 'Y ~ Groupe*Surface + (1|Participant)');
-        aovTbl = anova(lme, 'DFMethod', 'Satterthwaite');
+        % (A) Modèle standard : random intercept
+        lme_RI = fitlme(T_long, 'Y ~ Groupe*Surface + (1|Participant)', ...
+            'FitMethod','REML');
 
-        disp(aovTbl);
+        % (B) Option recommandée : random slope de Surface
+        % Pour comparer des structures de random effects, on compare en ML.
+        lme_RI_ML = fitlme(T_long, 'Y ~ Groupe*Surface + (1|Participant)', ...
+            'FitMethod','ML');
+        lme_RS_ML = [];
+        bestModel = lme_RI;         % par défaut
+        bestModelName = "RI_REML";  % random intercept
 
-        % Extraire p-values et F
-        pGroup = NaN; pSurface = NaN; pInteraction = NaN;
-        FGroup = NaN; FSurface = NaN; FInteraction = NaN;
+        try
+            lme_RS_ML = fitlme(T_long, 'Y ~ Groupe*Surface + (1 + Surface|Participant)', ...
+                'FitMethod','ML');
 
-        if any(strcmp(aovTbl.Term, 'Groupe'))
-            idx = strcmp(aovTbl.Term, 'Groupe');
-            pGroup = aovTbl.pValue(idx);
-            FGroup = aovTbl.FStat(idx);
+            % Sélection simple (standard) : AIC plus faible en ML
+            if lme_RS_ML.ModelCriterion.AIC + 2 < lme_RI_ML.ModelCriterion.AIC
+                % Refit en REML pour estimation finale (standard)
+                bestModel = fitlme(T_long, 'Y ~ Groupe*Surface + (1 + Surface|Participant)', ...
+                    'FitMethod','REML');
+                bestModelName = "RS_REML";
+            end
+        catch
+            % si le modèle slope ne converge pas, on reste sur RI
         end
-        if any(strcmp(aovTbl.Term, 'Surface'))
-            idx = strcmp(aovTbl.Term, 'Surface');
-            pSurface = aovTbl.pValue(idx);
-            FSurface = aovTbl.FStat(idx);
-        end
-        if any(strcmp(aovTbl.Term, 'Groupe:Surface'))
-            idx = strcmp(aovTbl.Term, 'Groupe:Surface');
-            pInteraction = aovTbl.pValue(idx);
-            FInteraction = aovTbl.FStat(idx);
+
+        lme = bestModel;
+
+        fprintf('Modèle retenu : %s\n', bestModelName);
+        fprintf('Formule : %s\n', lme.Formula);
+
+        % =========================================================
+        % 3) Table ANOVA des effets fixes (Satterthwaite)
+        % =========================================================
+        aov = anova(lme, 'DFMethod','Satterthwaite');
+        disp(aov);
+
+        [pGroup, FGroup]         = getTermStats_STD(aov, 'Groupe');
+        [pSurface, FSurface]     = getTermStats_STD(aov, 'Surface');
+        [pInter, FInter]         = getTermStats_STD(aov, 'Groupe:Surface');
+
+        fprintf('\nEffets fixes (Satterthwaite):\n');
+        fprintf('  Groupe       : p=%.4f, F=%.3f\n', pGroup,   FGroup);
+        fprintf('  Surface      : p=%.4f, F=%.3f\n', pSurface, FSurface);
+        fprintf('  Interaction  : p=%.4f, F=%.3f\n', pInter,   FInter);
+
+% =========================================================
+% POST-HOC (standard)
+%   - If interaction is significant:
+%         (A) Surface within each Groupe (Holm within-group)
+%         (B) Groupe within each Surface (Holm within-surface)
+%   - Else:
+%         Post-hocs main effects (Groupe / Surface) ONLY if significant
+% =========================================================
+
+% Fixed-effects components (used everywhere below)
+D      = designMatrix(lme,'Fixed');         % Nobs x P
+beta   = fixedEffects(lme);                 % P x 1
+C      = lme.CoefficientCovariance;         % P x P
+df_res = lme.DFE;
+
+groupLevels   = categories(T_long.Groupe);
+surfaceLevels = categories(T_long.Surface);
+
+if ~isnan(pInter) && pInter < alpha
+
+    % =========================================================
+    % (A) POST-HOC INTERACTION: Surface within each Groupe
+    % =========================================================
+    fprintf('\n   → Post-hoc Interaction A: Surface within each Groupe (Holm)\n');
+
+    for g = 1:numel(groupLevels)
+        gName = groupLevels{g};
+        fprintf('    Groupe: %s\n', gName);
+
+        % xbar: one "design row" per surface within this group
+        xbar = NaN(numel(surfaceLevels), size(D,2));
+        for s = 1:numel(surfaceLevels)
+            sName = surfaceLevels{s};
+            idx = (T_long.Groupe == gName) & (T_long.Surface == sName);
+            if any(idx)
+                xbar(s,:) = mean(D(idx,:), 1);
+            end
         end
 
-        fprintf('\n--- Résumé des effets fixes ---\n');
-        fprintf('Groupe       : p = %.4f (F = %.3f)\n', pGroup, FGroup);
-        fprintf('Surface      : p = %.4f (F = %.3f)\n', pSurface, FSurface);
-        fprintf('Interaction  : p = %.4f (F = %.3f)\n', pInteraction, FInteraction);
+        % pairwise surfaces
+        pairs   = nchoosek(1:numel(surfaceLevels), 2);
+        compLab = strings(size(pairs,1),1);
+        p_raw   = NaN(size(pairs,1),1);
+        est     = NaN(size(pairs,1),1);
+        lCI     = NaN(size(pairs,1),1);
+        uCI     = NaN(size(pairs,1),1);
 
-        % Stocker
+        for k = 1:size(pairs,1)
+            i1 = pairs(k,1); i2 = pairs(k,2);
+            s1 = string(surfaceLevels{i1}); s2 = string(surfaceLevels{i2});
+            compLab(k) = s1 + " vs " + s2;
+
+            if any(isnan(xbar(i1,:))) || any(isnan(xbar(i2,:)))
+                continue;
+            end
+
+            L = xbar(i1,:) - xbar(i2,:);
+
+            p_raw(k) = coefTest(lme, L);
+
+            est(k) = L * beta;
+            se     = sqrt(L * C * L');
+            tcrit  = tinv(0.975, df_res);
+            lCI(k) = est(k) - tcrit * se;
+            uCI(k) = est(k) + tcrit * se;
+        end
+
+        valid = ~isnan(p_raw);
+        if ~any(valid)
+            fprintf('      → Aucun contraste valide\n');
+            continue;
+        end
+
+        p_adj = NaN(size(p_raw));
+        p_adj(valid) = holmAdjustVector(p_raw(valid));
+
+        for k = 1:numel(p_raw)
+            if isnan(p_raw(k)); continue; end
+
+            newRow = table( ...
+                string(varName), ...
+                "Interaction_SurfaceWithinGroup", ...
+                string(gName), ...
+                compLab(k), ...
+                est(k), lCI(k), uCI(k), ...
+                p_raw(k), p_adj(k), ...
+                "Holm_withinGroup", ...
+                'VariableNames', {'Variable','Effect','Group','Comparison', ...
+                                  'Estimate','LowerCI','UpperCI','pValue_raw','pValue_adj','Method'} );
+
+            posthocAll = [posthocAll; newRow]; %#ok<AGROW>
+
+            if p_adj(k) < alpha
+                fprintf('      %s: p_adj=%.4f *  (Est=%.4g, CI=[%.4g; %.4g])\n', ...
+                    compLab(k), p_adj(k), est(k), lCI(k), uCI(k));
+            else
+                fprintf('      %s: p_adj=%.4f    (Est=%.4g)\n', ...
+                    compLab(k), p_adj(k), est(k));
+            end
+        end
+    end
+
+    % =========================================================
+    % (B) POST-HOC INTERACTION: Groupe within each Surface
+    % =========================================================
+    fprintf('\n   → Post-hoc Interaction B: Groupe within each Surface (Holm)\n');
+
+    for s = 1:numel(surfaceLevels)
+        sName = surfaceLevels{s};
+        fprintf('    Surface: %s\n', sName);
+
+        % xbar: one "design row" per group within this surface
+        xbar = NaN(numel(groupLevels), size(D,2));
+        for g = 1:numel(groupLevels)
+            gName = groupLevels{g};
+            idx = (T_long.Groupe == gName) & (T_long.Surface == sName);
+            if any(idx)
+                xbar(g,:) = mean(D(idx,:), 1);
+            end
+        end
+
+        % pairwise groups
+        pairs   = nchoosek(1:numel(groupLevels), 2);
+        compLab = strings(size(pairs,1),1);
+        p_raw   = NaN(size(pairs,1),1);
+        est     = NaN(size(pairs,1),1);
+        lCI     = NaN(size(pairs,1),1);
+        uCI     = NaN(size(pairs,1),1);
+
+        for k = 1:size(pairs,1)
+            i1 = pairs(k,1); i2 = pairs(k,2);
+            g1 = string(groupLevels{i1}); g2 = string(groupLevels{i2});
+            compLab(k) = g1 + " vs " + g2;
+
+            if any(isnan(xbar(i1,:))) || any(isnan(xbar(i2,:)))
+                continue;
+            end
+
+            L = xbar(i1,:) - xbar(i2,:);
+
+            p_raw(k) = coefTest(lme, L);
+
+            est(k) = L * beta;
+            se     = sqrt(L * C * L');
+            tcrit  = tinv(0.975, df_res);
+            lCI(k) = est(k) - tcrit * se;
+            uCI(k) = est(k) + tcrit * se;
+        end
+
+        valid = ~isnan(p_raw);
+        if ~any(valid)
+            fprintf('      → Aucun contraste valide\n');
+            continue;
+        end
+
+        p_adj = NaN(size(p_raw));
+        p_adj(valid) = holmAdjustVector(p_raw(valid));
+
+        for k = 1:numel(p_raw)
+            if isnan(p_raw(k)); continue; end
+
+            newRow = table( ...
+                string(varName), ...
+                "Interaction_GroupWithinSurface", ...
+                "All", ...                        % colonne Group: on met "All" car c'est l'effet "Groupe"
+                "Surface=" + string(sName) + ": " + compLab(k), ...
+                est(k), lCI(k), uCI(k), ...
+                p_raw(k), p_adj(k), ...
+                "Holm_withinSurface", ...
+                'VariableNames', {'Variable','Effect','Group','Comparison', ...
+                                  'Estimate','LowerCI','UpperCI','pValue_raw','pValue_adj','Method'} );
+
+            posthocAll = [posthocAll; newRow]; %#ok<AGROW>
+
+            if p_adj(k) < alpha
+                fprintf('      %s: p_adj=%.4f *  (Est=%.4g, CI=[%.4g; %.4g])\n', ...
+                    compLab(k), p_adj(k), est(k), lCI(k), uCI(k));
+            else
+                fprintf('      %s: p_adj=%.4f    (Est=%.4g)\n', ...
+                    compLab(k), p_adj(k), est(k));
+            end
+        end
+    end
+
+else
+    % =========================================================
+    % NO interaction (or NaN): main effects post-hocs if significant
+    % =========================================================
+
+    % ---------- Post-hoc Groupe (moyenné sur Surface) ----------
+    if ~isnan(pGroup) && pGroup < alpha
+        fprintf('\n   → Post-hoc Groupe (moyenné sur Surface, Holm)\n');
+
+        % design row marginale par groupe (moyenne égale sur surfaces, conservateur)
+        xbarG = NaN(numel(groupLevels), size(D,2));
+
+        for g = 1:numel(groupLevels)
+            gName = groupLevels{g};
+
+            rowsS = NaN(numel(surfaceLevels), size(D,2));
+            for s = 1:numel(surfaceLevels)
+                sName = surfaceLevels{s};
+                idx = (T_long.Groupe == gName) & (T_long.Surface == sName);
+                if any(idx)
+                    rowsS(s,:) = mean(D(idx,:),1);
+                end
+            end
+
+            % Conservateur: il faut que toutes les surfaces existent pour ce groupe
+            if all(~any(isnan(rowsS),2))
+                xbarG(g,:) = mean(rowsS, 1);
+            end
+        end
+
+        pairs   = nchoosek(1:numel(groupLevels), 2);
+        compLab = strings(size(pairs,1),1);
+        p_raw   = NaN(size(pairs,1),1);
+        est     = NaN(size(pairs,1),1);
+        lCI     = NaN(size(pairs,1),1);
+        uCI     = NaN(size(pairs,1),1);
+
+        for k = 1:size(pairs,1)
+            i1 = pairs(k,1); i2 = pairs(k,2);
+            g1 = string(groupLevels{i1}); g2 = string(groupLevels{i2});
+            compLab(k) = g1 + " vs " + g2;
+
+            if any(isnan(xbarG(i1,:))) || any(isnan(xbarG(i2,:)))
+                continue;
+            end
+
+            L = xbarG(i1,:) - xbarG(i2,:);
+
+            p_raw(k) = coefTest(lme, L);
+
+            est(k) = L * beta;
+            se     = sqrt(L * C * L');
+            tcrit  = tinv(0.975, df_res);
+            lCI(k) = est(k) - tcrit * se;
+            uCI(k) = est(k) + tcrit * se;
+        end
+
+        valid = ~isnan(p_raw);
+        if any(valid)
+            p_adj = NaN(size(p_raw));
+            p_adj(valid) = holmAdjustVector(p_raw(valid));
+        else
+            p_adj = NaN(size(p_raw));
+        end
+
+        for k = 1:numel(p_raw)
+            if isnan(p_raw(k)); continue; end
+
+            newRow = table( ...
+                string(varName), ...
+                "MainEffect_Groupe", ...
+                "All", ...
+                compLab(k), ...
+                est(k), lCI(k), uCI(k), ...
+                p_raw(k), p_adj(k), ...
+                "Holm", ...
+                'VariableNames', {'Variable','Effect','Group','Comparison', ...
+                                  'Estimate','LowerCI','UpperCI','pValue_raw','pValue_adj','Method'} );
+
+            posthocAll = [posthocAll; newRow]; %#ok<AGROW>
+
+            if p_adj(k) < alpha
+                fprintf('      %s: p_adj=%.4f *  (Est=%.4g, CI=[%.4g; %.4g])\n', ...
+                    compLab(k), p_adj(k), est(k), lCI(k), uCI(k));
+            else
+                fprintf('      %s: p_adj=%.4f    (Est=%.4g)\n', ...
+                    compLab(k), p_adj(k), est(k));
+            end
+        end
+    end
+
+    % ---------- Post-hoc Surface (moyenné sur Groupe) ----------
+    if ~isnan(pSurface) && pSurface < alpha
+        fprintf('\n   → Post-hoc Surface (moyenné sur Groupe, Holm)\n');
+
+        % design row marginale par surface (moyenne égale sur groupes, conservateur)
+        xbarS = NaN(numel(surfaceLevels), size(D,2));
+
+        for s = 1:numel(surfaceLevels)
+            sName = surfaceLevels{s};
+
+            rowsG = NaN(numel(groupLevels), size(D,2));
+            for g = 1:numel(groupLevels)
+                gName = groupLevels{g};
+                idx = (T_long.Groupe == gName) & (T_long.Surface == sName);
+                if any(idx)
+                    rowsG(g,:) = mean(D(idx,:),1);
+                end
+            end
+
+            % Conservateur: il faut que tous les groupes existent pour cette surface
+            if all(~any(isnan(rowsG),2))
+                xbarS(s,:) = mean(rowsG, 1);
+            end
+        end
+
+        pairs   = nchoosek(1:numel(surfaceLevels), 2);
+        compLab = strings(size(pairs,1),1);
+        p_raw   = NaN(size(pairs,1),1);
+        est     = NaN(size(pairs,1),1);
+        lCI     = NaN(size(pairs,1),1);
+        uCI     = NaN(size(pairs,1),1);
+
+        for k = 1:size(pairs,1)
+            i1 = pairs(k,1); i2 = pairs(k,2);
+            s1 = string(surfaceLevels{i1}); s2 = string(surfaceLevels{i2});
+            compLab(k) = s1 + " vs " + s2;
+
+            if any(isnan(xbarS(i1,:))) || any(isnan(xbarS(i2,:)))
+                continue;
+            end
+
+            L = xbarS(i1,:) - xbarS(i2,:);
+
+            p_raw(k) = coefTest(lme, L);
+
+            est(k) = L * beta;
+            se     = sqrt(L * C * L');
+            tcrit  = tinv(0.975, df_res);
+            lCI(k) = est(k) - tcrit * se;
+            uCI(k) = est(k) + tcrit * se;
+        end
+
+        valid = ~isnan(p_raw);
+        if any(valid)
+            p_adj = NaN(size(p_raw));
+            p_adj(valid) = holmAdjustVector(p_raw(valid));
+        else
+            p_adj = NaN(size(p_raw));
+        end
+
+        for k = 1:numel(p_raw)
+            if isnan(p_raw(k)); continue; end
+
+            newRow = table( ...
+                string(varName), ...
+                "MainEffect_Surface", ...
+                "All", ...
+                compLab(k), ...
+                est(k), lCI(k), uCI(k), ...
+                p_raw(k), p_adj(k), ...
+                "Holm", ...
+                'VariableNames', {'Variable','Effect','Group','Comparison', ...
+                                  'Estimate','LowerCI','UpperCI','pValue_raw','pValue_adj','Method'} );
+
+            posthocAll = [posthocAll; newRow]; %#ok<AGROW>
+
+            if p_adj(k) < alpha
+                fprintf('      %s: p_adj=%.4f *  (Est=%.4g, CI=[%.4g; %.4g])\n', ...
+                    compLab(k), p_adj(k), est(k), lCI(k), uCI(k));
+            else
+                fprintf('      %s: p_adj=%.4f    (Est=%.4g)\n', ...
+                    compLab(k), p_adj(k), est(k));
+            end
+        end
+    end
+end
+
+        % =========================================================
+        % 5) Stockage + récapitulatif
+        % =========================================================
         res = struct();
-        res.lme   = lme;
-        res.aov   = aovTbl;
-        res.pGroup = pGroup;
-        res.pSurface = pSurface;
-        res.pInteraction = pInteraction;
-        res.FGroup = FGroup;
-        res.FSurface = FSurface;
-        res.FInteraction = FInteraction;
+        res.varName = varName;
+        res.modelName = bestModelName;
+        res.lme = lme;
+        res.aov = aov;
+        res.pGroup = pGroup; res.FGroup = FGroup;
+        res.pSurface = pSurface; res.FSurface = FSurface;
+        res.pInteraction = pInter; res.FInteraction = FInter;
+        %res.EMMs = grid;
 
-        anovaResultsLMM.(matlab.lang.makeValidName(varName)) = res;
+        resultsLMM.(matlab.lang.makeValidName(varName)) = res;
 
-        % Ajout au tableau récap
         recapTable = [recapTable; table( ...
-            {strrep(varName,'_',' ')}, ...
+            string(varName), string(bestModelName), ...
             pGroup, FGroup, ...
             pSurface, FSurface, ...
-            pInteraction, FInteraction, ...
-            'VariableNames', {'Variable','p_Groupe','F_Groupe', ...
+            pInter, FInter, ...
+            'VariableNames', {'Variable','Model', ...
+                              'p_Groupe','F_Groupe', ...
                               'p_Surface','F_Surface', ...
                               'p_Interaction','F_Interaction'})]; %#ok<AGROW>
-
-        % ==============================
-        % 4. POST-HOCS OPTIMISÉS
-        % ==============================
-        
-        groupLevels = categories(T_long.Groupe);
-        surfaceLevels = categories(T_long.Surface);
-        nGroups = length(groupLevels);
-        nSurfaces = length(surfaceLevels);
-        
-        coefNames = lme.CoefficientNames;
-        df_residual = lme.DFE;
-        
-        fprintf('\n📊 Modèle : %d coefficients, DF = %.1f\n', ...
-            lme.NumCoefficients, df_residual);
-
-        % POST-HOC GROUPE
-        if ~isnan(pGroup) && pGroup < alpha
-            fprintf('\n   → Post-hoc Groupe\n');
-            try
-                nComp = (nGroups * (nGroups - 1)) / 2;
-                pvals_raw = zeros(nComp, 1);
-                estimates = zeros(nComp, 1);
-                lowerCIs = zeros(nComp, 1);
-                upperCIs = zeros(nComp, 1);
-                compLabels = cell(nComp, 2);
-                compIdx = 1;
-                
-                for i = 1:nGroups-1
-                    for j = i+1:nGroups
-                        g1 = groupLevels{i};
-                        g2 = groupLevels{j};
-                        
-                        L = zeros(1, lme.NumCoefficients);
-                        
-                        if i == 1
-                            idx2 = find(contains(coefNames, ['Groupe_' char(g2)]), 1);
-                            if ~isempty(idx2)
-                                L(idx2) = 1;
-                            else
-                                compIdx = compIdx + 1;
-                                continue;
-                            end
-                        else
-                            idx1 = find(contains(coefNames, ['Groupe_' char(g1)]), 1);
-                            idx2 = find(contains(coefNames, ['Groupe_' char(g2)]), 1);
-                            
-                            if ~isempty(idx1) && ~isempty(idx2)
-                                L(idx1) = 1;
-                                L(idx2) = -1;
-                            else
-                                compIdx = compIdx + 1;
-                                continue;
-                            end
-                        end
-                        
-                        [p, est, lCI, uCI, ~] = testContrast(lme, L);
-                        
-                        pvals_raw(compIdx) = p;
-                        estimates(compIdx) = est;
-                        lowerCIs(compIdx) = lCI;
-                        upperCIs(compIdx) = uCI;
-                        compLabels{compIdx, 1} = string(g1);
-                        compLabels{compIdx, 2} = string(g2);
-                        
-                        compIdx = compIdx + 1;
-                    end
-                end
-                
-                % Supprimer entrées vides
-                validIdx = pvals_raw > 0;
-                pvals_raw = pvals_raw(validIdx);
-                estimates = estimates(validIdx);
-                lowerCIs = lowerCIs(validIdx);
-                upperCIs = upperCIs(validIdx);
-                compLabels = compLabels(validIdx, :);
-                
-                % Correction de Holm
-                [sortedP, idxSort] = sort(pvals_raw);
-                m = length(pvals_raw);
-                pvals_adj = zeros(m, 1);
-                
-                for k = 1:m
-                    pvals_adj(idxSort(k)) = min(sortedP(k) * (m - k + 1), 1);
-                end
-                
-                for k = m-1:-1:1
-                    pvals_adj(idxSort(k)) = min(pvals_adj(idxSort(k)), pvals_adj(idxSort(k+1)));
-                end
-                
-                % Stocker
-                for k = 1:m
-                    newRow = table( ...
-                        string(varName), ...
-                        "Groupe", ...
-                        compLabels{k,1}, compLabels{k,2}, ...
-                        estimates(k), ...
-                        lowerCIs(k), upperCIs(k), ...
-                        pvals_raw(k), ...
-                        pvals_adj(k), ...
-                        "LMM_Holm", ...
-                        'VariableNames', {'Variable','Effect','Level1','Level2', ...
-                                          'Estimate','LowerCI','UpperCI','pValue_raw','pValue_adj','Method'});
-                    posthocLMM = [posthocLMM; newRow]; %#ok<AGROW>
-                    
-                    if pvals_adj(k) < 0.05
-                        fprintf('    %s vs %s: p_adj = %.4f *\n', ...
-                            compLabels{k,1}, compLabels{k,2}, pvals_adj(k));
-                    end
-                end
-                
-            catch ME
-                fprintf('⚠️ Erreur post-hoc Groupe : %s\n', ME.message);
-            end
-        end
-
-        % POST-HOC SURFACE
-        if ~isnan(pSurface) && pSurface < alpha
-            fprintf('\n   → Post-hoc Surface\n');
-            try
-                nComp = (nSurfaces * (nSurfaces - 1)) / 2;
-                pvals_raw = zeros(nComp, 1);
-                estimates = zeros(nComp, 1);
-                lowerCIs = zeros(nComp, 1);
-                upperCIs = zeros(nComp, 1);
-                compLabels = cell(nComp, 2);
-                compIdx = 1;
-                
-                for i = 1:nSurfaces-1
-                    for j = i+1:nSurfaces
-                        s1 = surfaceLevels{i};
-                        s2 = surfaceLevels{j};
-                        
-                        L = zeros(1, lme.NumCoefficients);
-                        
-                        if i == 1
-                            idx2 = find(contains(coefNames, ['Surface_' char(s2)]), 1);
-                            if ~isempty(idx2)
-                                L(idx2) = 1;
-                            else
-                                compIdx = compIdx + 1;
-                                continue;
-                            end
-                        else
-                            idx1 = find(contains(coefNames, ['Surface_' char(s1)]), 1);
-                            idx2 = find(contains(coefNames, ['Surface_' char(s2)]), 1);
-                            
-                            if ~isempty(idx1) && ~isempty(idx2)
-                                L(idx1) = 1;
-                                L(idx2) = -1;
-                            else
-                                compIdx = compIdx + 1;
-                                continue;
-                            end
-                        end
-                        
-                        [p, est, lCI, uCI, ~] = testContrast(lme, L);
-                        
-                        pvals_raw(compIdx) = p;
-                        estimates(compIdx) = est;
-                        lowerCIs(compIdx) = lCI;
-                        upperCIs(compIdx) = uCI;
-                        compLabels{compIdx, 1} = string(s1);
-                        compLabels{compIdx, 2} = string(s2);
-                        
-                        compIdx = compIdx + 1;
-                    end
-                end
-                
-                validIdx = pvals_raw > 0;
-                pvals_raw = pvals_raw(validIdx);
-                estimates = estimates(validIdx);
-                lowerCIs = lowerCIs(validIdx);
-                upperCIs = upperCIs(validIdx);
-                compLabels = compLabels(validIdx, :);
-                
-                [sortedP, idxSort] = sort(pvals_raw);
-                m = length(pvals_raw);
-                pvals_adj = zeros(m, 1);
-                
-                for k = 1:m
-                    pvals_adj(idxSort(k)) = min(sortedP(k) * (m - k + 1), 1);
-                end
-                
-                for k = m-1:-1:1
-                    pvals_adj(idxSort(k)) = min(pvals_adj(idxSort(k)), pvals_adj(idxSort(k+1)));
-                end
-                
-                for k = 1:m
-                    newRow = table( ...
-                        string(varName), ...
-                        "Surface", ...
-                        compLabels{k,1}, compLabels{k,2}, ...
-                        estimates(k), ...
-                        lowerCIs(k), upperCIs(k), ...
-                        pvals_raw(k), ...
-                        pvals_adj(k), ...
-                        "LMM_Holm", ...
-                        'VariableNames', {'Variable','Effect','Level1','Level2', ...
-                                          'Estimate','LowerCI','UpperCI','pValue_raw','pValue_adj','Method'});
-                    posthocLMM = [posthocLMM; newRow]; %#ok<AGROW>
-                    
-                    if pvals_adj(k) < 0.05
-                        fprintf('    %s vs %s: p_adj = %.4f *\n', ...
-                            compLabels{k,1}, compLabels{k,2}, pvals_adj(k));
-                    end
-                end
-                
-            catch ME
-                fprintf('⚠️ Erreur post-hoc Surface : %s\n', ME.message);
-            end
-        end
-
-        % POST-HOC INTERACTION
-        if ~isnan(pInteraction) && pInteraction < alpha
-            fprintf('\n   → Post-hoc Interaction\n');
-            try
-                for g = 1:nGroups
-                    gName = groupLevels{g};
-                    fprintf('    Groupe: %s\n', gName);
-                    
-                    nComp_int = (nSurfaces * (nSurfaces - 1)) / 2;
-                    pvals_raw_g = zeros(nComp_int, 1);
-                    estimates_g = zeros(nComp_int, 1);
-                    lowerCIs_g = zeros(nComp_int, 1);
-                    upperCIs_g = zeros(nComp_int, 1);
-                    compLabels_g = cell(nComp_int, 2);
-                    compIdx_g = 1;
-                    
-                    for i = 1:nSurfaces-1
-                        for j = i+1:nSurfaces
-                            s1 = surfaceLevels{i};
-                            s2 = surfaceLevels{j};
-                            
-                            L = zeros(1, lme.NumCoefficients);
-                            
-                            if g == 1 && i == 1
-                                idx_surf = find(contains(coefNames, ['Surface_' char(s2)]), 1);
-                                if ~isempty(idx_surf)
-                                    L(idx_surf) = 1;
-                                else
-                                    compIdx_g = compIdx_g + 1;
-                                    continue;
-                                end
-                            elseif g == 1
-                                idx_s1 = find(contains(coefNames, ['Surface_' char(s1)]), 1);
-                                idx_s2 = find(contains(coefNames, ['Surface_' char(s2)]), 1);
-                                if ~isempty(idx_s1) && ~isempty(idx_s2)
-                                    L(idx_s1) = 1;
-                                    L(idx_s2) = -1;
-                                else
-                                    compIdx_g = compIdx_g + 1;
-                                    continue;
-                                end
-                            else
-                                if i == 1
-                                    idx_surf = find(contains(coefNames, ['Surface_' char(s2)]), 1);
-                                    idx_int = find(contains(coefNames, ['Groupe_' char(gName)]) & ...
-                                                  contains(coefNames, ['Surface_' char(s2)]), 1);
-                                    
-                                    if ~isempty(idx_surf), L(idx_surf) = 1; end
-                                    if ~isempty(idx_int), L(idx_int) = 1; end
-                                    
-                                    if isempty(idx_surf) && isempty(idx_int)
-                                        compIdx_g = compIdx_g + 1;
-                                        continue;
-                                    end
-                                else
-                                    idx_s1 = find(contains(coefNames, ['Surface_' char(s1)]), 1);
-                                    idx_s2 = find(contains(coefNames, ['Surface_' char(s2)]), 1);
-                                    idx_int_s1 = find(contains(coefNames, ['Groupe_' char(gName)]) & ...
-                                                     contains(coefNames, ['Surface_' char(s1)]), 1);
-                                    idx_int_s2 = find(contains(coefNames, ['Groupe_' char(gName)]) & ...
-                                                     contains(coefNames, ['Surface_' char(s2)]), 1);
-                                    
-                                    if ~isempty(idx_s1), L(idx_s1) = 1; end
-                                    if ~isempty(idx_s2), L(idx_s2) = -1; end
-                                    if ~isempty(idx_int_s1), L(idx_int_s1) = 1; end
-                                    if ~isempty(idx_int_s2), L(idx_int_s2) = -1; end
-                                    
-                                    if all(L == 0)
-                                        compIdx_g = compIdx_g + 1;
-                                        continue;
-                                    end
-                                end
-                            end
-                            
-                            [p, est, lCI, uCI, ~] = testContrast(lme, L);
-                            
-                            pvals_raw_g(compIdx_g) = p;
-                            estimates_g(compIdx_g) = est;
-                            lowerCIs_g(compIdx_g) = lCI;
-                            upperCIs_g(compIdx_g) = uCI;
-                            compLabels_g{compIdx_g, 1} = string(s1);
-                            compLabels_g{compIdx_g, 2} = string(s2);
-                            
-                            compIdx_g = compIdx_g + 1;
-                        end
-                    end
-                    
-                    validIdx_g = pvals_raw_g > 0;
-                    pvals_raw_g = pvals_raw_g(validIdx_g);
-                    estimates_g = estimates_g(validIdx_g);
-                    lowerCIs_g = lowerCIs_g(validIdx_g);
-                    upperCIs_g = upperCIs_g(validIdx_g);
-                    compLabels_g = compLabels_g(validIdx_g, :);
-                    
-                    if isempty(pvals_raw_g)
-                        fprintf('      → Aucun contraste valide\n');
-                        continue;
-                    end
-                    
-                    [sortedP_g, idxSort_g] = sort(pvals_raw_g);
-                    m_g = length(pvals_raw_g);
-                    pvals_adj_g = zeros(m_g, 1);
-                    
-                    for k = 1:m_g
-                        pvals_adj_g(idxSort_g(k)) = min(sortedP_g(k) * (m_g - k + 1), 1);
-                    end
-                    
-                    for k = m_g-1:-1:1
-                        pvals_adj_g(idxSort_g(k)) = min(pvals_adj_g(idxSort_g(k)), ...
-                                                         pvals_adj_g(idxSort_g(k+1)));
-                    end
-                    
-                    for k = 1:m_g
-                        newRow = table( ...
-                            string(varName), ...
-                            "Surface|Groupe", ...
-                            compLabels_g{k,1} + " | " + string(gName), ...
-                            compLabels_g{k,2} + " | " + string(gName), ...
-                            estimates_g(k), ...
-                            lowerCIs_g(k), upperCIs_g(k), ...
-                            pvals_raw_g(k), ...
-                            pvals_adj_g(k), ...
-                            "LMM_Contraste_Holm", ...
-                            'VariableNames', {'Variable','Effect','Level1','Level2', ...
-                                              'Estimate','LowerCI','UpperCI','pValue_raw','pValue_adj','Method'});
-                        posthocLMM = [posthocLMM; newRow]; %#ok<AGROW>
-                        
-                        if pvals_adj_g(k) < 0.05
-                            fprintf('      %s vs %s: p_adj = %.4f *\n', ...
-                                compLabels_g{k,1}, compLabels_g{k,2}, pvals_adj_g(k));
-                        end
-                    end
-                end
-                
-            catch ME
-                fprintf('⚠️ Erreur post-hoc interaction : %s\n', ME.message);
-            end
-        end
 
     catch ME
         fprintf('⚠️ Erreur LMM pour %s : %s\n', varName, ME.message);
         if ~isempty(ME.stack)
-            fprintf('   Stack: %s (ligne %d)\n', ME.stack(1).name, ME.stack(1).line);
+            fprintf('   -> %s (ligne %d)\n', ME.stack(1).name, ME.stack(1).line);
         end
         continue;
     end
 end
 
-%% SAUVEGARDE DES RÉSULTATS LMM
-save(fullfile(save_path, 'LMM_Results.mat'), 'anovaResultsLMM');
-fprintf('\n✅ Résultats LMM sauvegardés : %s\n', fullfile(save_path, 'LMM_Results.mat'));
+%% Sauvegarde
+save(fullfile(save_path, 'LMM_Results.mat'), 'resultsLMM');
 
-%% EXPORT CSV RÉCAPITULATIF DES EFFETS FIXES
-outputDir = fullfile(save_path, 'LMM_Recap');
-if ~exist(outputDir, 'dir'); mkdir(outputDir); end
+%% Exports CSV
+outDir = fullfile(save_path, 'Exports');
+if ~exist(outDir,'dir'); mkdir(outDir); end
 
-csvRecapPath = fullfile(outputDir, 'LMM_Recap_FixedEffects.csv');
+% Récap
+recapTable.Sig_Groupe      = starsCol(recapTable.p_Groupe);
+recapTable.Sig_Surface     = starsCol(recapTable.p_Surface);
+recapTable.Sig_Interaction = starsCol(recapTable.p_Interaction);
+writetable(recapTable, fullfile(outDir, 'LMM_Recap_FixedEffects.csv'));
 
-% indicateur de significativité dans le récapitulatif
-stars = @(p) repmat('*',1,sum(p < [0.05 0.01 0.001]));
-
-recapTable.Sig_Groupe      = cellfun(stars, num2cell(recapTable.p_Groupe), 'UniformOutput', false);
-recapTable.Sig_Surface     = cellfun(stars, num2cell(recapTable.p_Surface), 'UniformOutput', false);
-recapTable.Sig_Interaction = cellfun(stars, num2cell(recapTable.p_Interaction), 'UniformOutput', false);
-
-writetable(recapTable, csvRecapPath);
-
-fprintf('\n=== RÉSUMÉ FINAL LMM ===\n');
-fprintf('✅ LMM réalisés pour %d variables\n', height(recapTable));
-fprintf('✅ Tableau récapitulatif exporté : %s\n', csvRecapPath);
-
-%% EXPORT CSV DES POST-HOCS
-if ~isempty(posthocLMM)
-    Stars = cell(height(posthocLMM),1);
-    for i = 1:height(posthocLMM)
-        % utiliser les p-values ajustées
-        p = posthocLMM.pValue_adj(i);
-        nStar = sum(p < [0.05 0.01 0.001]);
-        Stars{i} = repmat('*',1,nStar);
-    end
-    posthocLMM.Stars = Stars;
+% Post-hoc
+if ~isempty(posthocAll)
+    writetable(posthocAll, fullfile(outDir, 'LMM_PostHoc_EMM_Holm.csv'));
 end
 
-csvPosthocPath = fullfile(outputDir, 'LMM_PostHoc_All.csv');
-writetable(posthocLMM, csvPosthocPath);
-fprintf('📄 Post-hocs LMM exportés dans : %s\n', csvPosthocPath);
+fprintf('\n✅ Terminé.\n');
+fprintf('  - MAT: %s\n', fullfile(save_path, 'LMM_Results_STANDARD.mat'));
+fprintf('  - CSV recap: %s\n', fullfile(outDir, 'LMM_Recap_FixedEffects.csv'));
+if ~isempty(posthocAll)
+    fprintf('  - CSV posthoc: %s\n', fullfile(outDir, 'LMM_PostHoc_EMM_Holm.csv'));
+end
 
-%% Fonction helper
-function [pval, est, lowerCI, upperCI, df] = testContrast(lme, L)
-        % Test du contraste
-        [pval, F, DF1, DF2] = coefTest(lme, L);
-        
-        % Estimation de la différence
-        est = L * lme.Coefficients.Estimate;
-        
-        % Erreur standard
-        C = lme.CoefficientCovariance;
-        se = sqrt(L * C * L');
-        
-        % Distribution t (pas normale!)
-        df = DF2;
-        t_crit = tinv(0.975, df);
-        
-        % Intervalles de confiance
-        lowerCI = est - t_crit * se;
-        upperCI = est + t_crit * se;
+%% Fonctions locales (helpers)
+
+function T_long = buildLongTableFromStruct(S, varName, groupList, surfaceList)
+% Construit un format long en conservant toutes les observations disponibles.
+% Hypothèse: S.(group).(surface) est une table contenant 'Participant' + varName.
+
+    rows = {};
+    r = 0;
+
+    for g = 1:numel(groupList)
+        groupName = groupList{g};
+        if ~isfield(S, groupName); continue; end
+
+        % On prend l'ensemble des participants recensés dans n'importe quelle surface dispo
+        allParticipants = {};
+        for s = 1:numel(surfaceList)
+            surf = surfaceList{s};
+            if isfield(S.(groupName), surf)
+                Tsurf = S.(groupName).(surf);
+                if ~isempty(Tsurf) && any(strcmp(Tsurf.Properties.VariableNames, 'Participant'))
+                    allParticipants = [allParticipants; unique(Tsurf.Participant)]; %#ok<AGROW>
+                end
+            end
+        end
+        allParticipants = unique(allParticipants);
+
+        for p = 1:numel(allParticipants)
+            pid = allParticipants{p};
+
+            for s = 1:numel(surfaceList)
+                surf = surfaceList{s};
+                if ~isfield(S.(groupName), surf); continue; end
+
+                Tsurf = S.(groupName).(surf);
+                if isempty(Tsurf); continue; end
+                if ~any(strcmp(Tsurf.Properties.VariableNames, varName)); continue; end
+
+                idx = strcmp(Tsurf.Participant, pid);
+                if ~any(idx); continue; end
+
+                y = Tsurf.(varName)(idx);
+                y = y(1);
+
+                if isempty(y) || isnan(y); continue; end
+
+                r = r + 1;
+                rows{r,1} = pid;           %#ok<AGROW>
+                rows{r,2} = groupName;     %#ok<AGROW>
+                rows{r,3} = surf;          %#ok<AGROW>
+                rows{r,4} = y;             %#ok<AGROW>
+            end
+        end
     end
+
+    if r == 0
+        T_long = table();
+        return;
+    end
+
+    T_long = cell2table(rows, 'VariableNames', {'Participant','Groupe','Surface','Y'});
+
+    % Catégories ordonnées (utile pour interprétation et cohérence)
+    T_long.Participant = categorical(T_long.Participant);
+    T_long.Groupe  = categorical(T_long.Groupe,  groupList,  'Ordinal', true);
+    T_long.Surface = categorical(T_long.Surface, surfaceList,'Ordinal', true);
+end
+
+function [p, F] = getTermStats_STD(aov, termName)
+    p = NaN; F = NaN;
+    if any(strcmp(aov.Term, termName))
+        idx = strcmp(aov.Term, termName);
+        p = aov.pValue(idx);
+        F = aov.FStat(idx);
+    end
+end
+
+function grid = allcombGrid(groupList, surfaceList)
+% Grille complète Groupe x Surface pour EMMs
+    [G,S] = ndgrid(1:numel(groupList), 1:numel(surfaceList));
+    grid = table();
+    grid.Groupe  = categorical(groupList(G(:))', groupList, 'Ordinal', true);
+    grid.Surface = categorical(surfaceList(S(:))', surfaceList, 'Ordinal', true);
+
+    % Participant requis dans predict() ? Non, si Conditional=false, mais
+    % certains objets l'aiment présent -> on met un dummy.
+    grid.Participant = categorical(repmat("DUMMY", height(grid), 1));
+end
+
+function T = pairwiseMainEffect(lme, groupList, surfaceList, effectName, alpha)
+% Pairwise sur un effet principal via EMMs (population-level)
+    grid = allcombGrid(groupList, surfaceList);
+    mu = predict(lme, grid, 'Conditional', false);
+
+    T = table();
+    if effectName == "Groupe"
+        % moyenne marginale par Groupe (moyenne sur Surface)
+        groups = categorical(groupList, groupList, 'Ordinal', true);
+        m = zeros(numel(groups),1);
+        for i = 1:numel(groups)
+            m(i) = mean(mu(grid.Groupe == groups(i)));
+        end
+        [T, ~] = pairwiseFromMeans(m, string(categories(groups)), "Groupe", alpha);
+    elseif effectName == "Surface"
+        surfs = categorical(surfaceList, surfaceList, 'Ordinal', true);
+        m = zeros(numel(surfs),1);
+        for i = 1:numel(surfs)
+            m(i) = mean(mu(grid.Surface == surfs(i)));
+        end
+        [T, ~] = pairwiseFromMeans(m, string(categories(surfs)), "Surface", alpha);
+    end
+end
+
+function T = pairwiseSimpleEffects(lme, groupList, surfaceList, mode, alpha)
+% Simple effects via EMMs (population-level) :
+% - "SurfaceWithinGroup" : compare surfaces à l'intérieur de chaque groupe
+% - "GroupWithinSurface" : compare groupes à l'intérieur de chaque surface
+    grid = allcombGrid(groupList, surfaceList);
+    mu = predict(lme, grid, 'Conditional', false);
+
+    T = table();
+
+    groups = categorical(groupList, groupList, 'Ordinal', true);
+    surfs  = categorical(surfaceList, surfaceList, 'Ordinal', true);
+
+    if mode == "SurfaceWithinGroup"
+        for g = 1:numel(groups)
+            m = zeros(numel(surfs),1);
+            for s = 1:numel(surfs)
+                m(s) = mu(grid.Groupe==groups(g) & grid.Surface==surfs(s));
+            end
+            [Tout, ~] = pairwiseFromMeans(m, string(categories(surfs)), ...
+                "Surface|Groupe=" + string(groups(g)), alpha);
+            T = [T; Tout]; %#ok<AGROW>
+        end
+
+    elseif mode == "GroupWithinSurface"
+        for s = 1:numel(surfs)
+            m = zeros(numel(groups),1);
+            for g = 1:numel(groups)
+                m(g) = mu(grid.Groupe==groups(g) & grid.Surface==surfs(s));
+            end
+            [Tout, ~] = pairwiseFromMeans(m, string(categories(groups)), ...
+                "Groupe|Surface=" + string(surfs(s)), alpha);
+            T = [T; Tout]; %#ok<AGROW>
+        end
+    end
+end
+
+function [T, padj] = pairwiseFromMeans(m, labels, effectLabel, alpha)
+% Pairwise contrasts sur des "means" m (déjà marginales / EMMs)
+% Ici, on fait des différences simples + p-values via t approx :
+% IMPORTANT: pour une approche strictement inférentielle, il faudrait propager
+% la matrice de covariance des EMMs. MATLAB ne donne pas un "emmeans" natif,
+% donc on fournit une solution "standard pratique" souvent acceptée:
+% on reporte Estimate + p ajustées Holm, et on recommande de compléter par IC
+% des EMMs déjà fournis (CI_Low/High) et par des plots.
+%
+% Si tu veux l'inférence exacte EMM (SE/DF), je peux te donner la version
+% complète avec construction de la matrice de contraste à partir de lme.DesignMatrix.
+
+    n = numel(m);
+    pairs = n*(n-1)/2;
+
+    comp1 = strings(pairs,1);
+    comp2 = strings(pairs,1);
+    est   = zeros(pairs,1);
+    pval  = nan(pairs,1);
+
+    k = 0;
+    for i = 1:n-1
+        for j = i+1:n
+            k = k + 1;
+            comp1(k) = labels(i);
+            comp2(k) = labels(j);
+            est(k)   = m(i) - m(j);
+
+            % p-value "placeholder" = NaN (à éviter si tu veux une inférence stricte)
+            % -> On laisse NaN par transparence plutôt que d'inventer un SE.
+            pval(k) = NaN;
+        end
+    end
+
+    % On n'invente pas des p-values sans SE/DF.
+    % Mais tu veux des post-hocs "clean": la bonne solution est la version contrastes
+    % sur le modèle (coefTest) via une matrice de contraste construite sur la grille EMM.
+    %
+    % Pour rester 100% correct, on renvoie ici uniquement les estimates.
+    padj = pval;
+
+    T = table();
+    T.Effect = repmat(string(effectLabel), pairs, 1);
+    T.Level1 = comp1;
+    T.Level2 = comp2;
+    T.Estimate = est;
+    T.pValue_raw = pval;
+    T.pValue_adj = padj;
+    T.Signif = repmat("", pairs, 1);
+
+    % Marqueur si p-values disponibles (sinon vide)
+    if all(~isnan(padj))
+        T.Signif(padj < alpha) = "*";
+    end
+end
+
+function s = starsCol(p)
+    s = strings(numel(p),1);
+
+    for i = 1:numel(p)
+        if isnan(p(i))
+            s(i) = "";
+            continue;
+        end
+
+        nStar = sum(p(i) < [0.05 0.01 0.001]);
+
+        if nStar > 0
+            s(i) = string(repmat('*', 1, nStar));  % <-- FIX ICI
+        else
+            s(i) = "";
+        end
+    end
+end
+
+function p_adj = holmAdjustVector(p)
+    p = p(:);
+    [ps, idx] = sort(p);
+    m = numel(p);
+
+    adj_sorted = min(ps .* (m - (1:m)' + 1), 1);
+
+    % monotonicity
+    for i = m-1:-1:1
+        adj_sorted(i) = min(adj_sorted(i), adj_sorted(i+1));
+    end
+
+    p_adj = NaN(m,1);
+    p_adj(idx) = adj_sorted;
+end
