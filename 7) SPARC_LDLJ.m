@@ -19,15 +19,16 @@ fc_filter = 6;
 output_csv = sprintf('C:\\Users\\silve\\Desktop\\DOCTORAT\\UNIV MONTREAL\\TRAVAUX-THESE\\Surfaces_Irregulieres\\Datas\\Script\\gaitAnalysisGUI\\result\\Smoothness\\Smoothness_TrialBased_%s.csv', sujet_id);
 output_mat = sprintf('C:\\Users\\silve\\Desktop\\DOCTORAT\\UNIV MONTREAL\\TRAVAUX-THESE\\Surfaces_Irregulieres\\Datas\\Script\\gaitAnalysisGUI\\result\\Smoothness\\Smoothness_TrialBased_%s.mat', sujet_id);
 
-%% === INITIALISATION ===
+% === INITIALISATION ===
 results    = table();
 log_errors = {};
-fprintf('🔄 Analyse de fluidité PAR ESSAI COMPLET pour %s...\n\n', sujet_id);
+fprintf('🔄 Analyse de fluidité PAR ESSAI, du 1er au dernier HeelStrike, pour %s...\n\n', sujet_id);
+fprintf('Colonne 1 : axe ML; colonne 2 : axe AP; colonne 3 : axe V\n');
 
 % Filtre passe-bas
 [b, a] = butter(2, fc_filter/(freqVicon/2), 'low');
 
-%% === FLAG POUR VISUALISATION ===
+% === FLAG POUR VISUALISATION ===
 PLOT_SPECTRES = true;  % Mettre à false pour désactiver les plots
 MAX_PLOTS = 3;         % Nombre maximum de spectres à afficher
 plot_counter = 0;
@@ -124,7 +125,8 @@ for surf_idx = 1:length(surfaces)
             STERN_filt = filtfilt(b, a, STERN);
 
             % === VITESSES ===
-            vel_COM   = calculate_velocities(COM_filt,   freqVicon);  
+            vel_COM   = calculate_velocities(COM_filt,   freqVicon); 
+
             vel_STERN = calculate_velocities(STERN_filt, freqVicon);  % (NaN si STRN absent)
 
             % === INDICES DE FLUIDITÉ ===
@@ -151,19 +153,7 @@ for surf_idx = 1:length(surfaces)
                     smooth_STERN.(fields_STERN{f}) = NaN;
                 end
             end
-
-            % % === VISUALISATION POUR LES PREMIERS ESSAIS ===
-            % if PLOT_SPECTRES && plot_counter < MAX_PLOTS
-            %     % Extraire la vitesse pour une direction (ex: AP)
-            %     v_seg = vel_COM(start_frame:end_frame, 1); % 1 = AP
-            % 
-            %     % Calculer SPARC avec visualisation
-            %     titleStr = sprintf('%s - %s - Essai %02d - COM AP', ...
-            %                        sujet_id, surface, essai);
-            %     sparc_test = compute_SPARC(abs(v_seg), freqVicon, 'plot', true, 'title', titleStr);
-            %     plot_counter = plot_counter + 1;
-            % end
-
+     
             % === STOCKAGE ===
             new_row = struct();
             new_row.Sujet            = {sujet_id};
@@ -202,7 +192,7 @@ for surf_idx = 1:length(surfaces)
     end
 end
 
-%% === SAUVEGARDE ===
+% === SAUVEGARDE ===
 fprintf('💾 Sauvegarde...\n');
 
 % .CSV
@@ -212,6 +202,8 @@ save(output_mat, 'results', 'log_errors');
 
 nTrials = height(results);
 fprintf('📊 Total essais traités : %d\n', nTrials);
+
+fprintf('\n💡 PROCHAINE ÉTAPE : Lancer SpatioTemporal_Analysis.m\n');
 
 %% === FIGURES COMPARATIVES COM vs STERN ===
 
@@ -280,7 +272,11 @@ function COM = calculate_pelvic_COM(markers)
 end
 
 function vel = calculate_velocities(pos, fs)
-    vel = gradient(pos, 1/fs);
+    dt = 1/fs;
+    vel = zeros(size(pos));
+    for k = 1:size(pos,2)
+        vel(:,k) = gradient(pos(:,k), dt);
+    end
 end
 
 function smoothness = calculate_smoothness_indices(vel, i1, i2, fs)
@@ -304,18 +300,18 @@ function smoothness = calculate_smoothness_indices(vel, i1, i2, fs)
     zeroPadIdx   = 4;
     params       = [ampThreshold, fMaxHz, zeroPadIdx];
 
-    directions = {'AP','ML','V'};
+    directions = {'ML','AP','V'};
 
     % === SPARC et LDLJ par direction ===
     for d = 1:3
         v_seg = vel(i1:i2, d);
 
         % IMPORTANT: SpectralArcLength attend un vecteur vitesse (speed) en LIGNE 1xN
-        % Tu utilises abs(...) pour avoir un speed positif (comme dans ton code actuel)
+        % abs(...) pour avoir un speed positif
         speed = abs(v_seg(:))';  % 1xN
 
         smoothness.(sprintf('SPARC_%s', directions{d})) = SpectralArcLength(speed, Ts, params);
-        smoothness.(sprintf('LDLJ_%s',  directions{d})) = compute_LDLJ(v_seg, fs);
+        smoothness.(sprintf('LDLJ_%s',  directions{d})) = compute_LDLJ(abs(v_seg), fs);
     end
 
     % === Magnitude 3D ===
@@ -326,117 +322,6 @@ function smoothness = calculate_smoothness_indices(vel, i1, i2, fs)
     smoothness.LDLJ_Magnitude  = compute_LDLJ(v_mag, fs);
 end
 
-% function sparc = compute_SPARC(velocity, fs, varargin)
-% % compute_SPARC - Calcule le SPARC avec option de visualisation du spectre
-% %
-% % Syntaxe:
-% %   sparc = compute_SPARC(velocity, fs)
-% %   sparc = compute_SPARC(velocity, fs, 'plot', true)
-% %   sparc = compute_SPARC(velocity, fs, 'plot', true, 'title', 'Mon titre')
-% %
-% % Paramètres:
-% %   velocity : vecteur de vitesse
-% %   fs       : fréquence d'échantillonnage (Hz)
-% %   'plot'   : true/false pour afficher le spectre (défaut: false)
-% %   'title'  : titre personnalisé pour la figure
-% 
-%     % Parsing des arguments optionnels
-%     p = inputParser;
-%     addParameter(p, 'plot', false, @islogical);
-%     addParameter(p, 'title', '', @ischar);
-%     parse(p, varargin{:});
-% 
-%     doPlot = p.Results.plot;
-%     plotTitle = p.Results.title;
-% 
-%     % Vérifications initiales
-%     if length(velocity) < 20 || all(isnan(velocity))
-%         sparc = NaN;
-%         return;
-%     end
-% 
-%     velocity = velocity(:);
-% 
-%     % Etapes basées sur Balasubramanian et al. 2012
-% 
-%     % ÉTAPE 1: FFT avec zero-padding (padlevel = 4)
-%     N = length(velocity);
-%     K = 2^(nextpow2(N) + 4);  
-%     V = abs(fft(velocity, K));
-%     V = V(1:K/2+1);
-% 
-%     % ÉTAPE 2: Normalisation par DC
-%     V0 = max(V(1), 1e-10);
-%     Vn = V / V0; 
-%     %Vn = V / max(V); % test normalisation par max du spectre (pas recommandé)
-% 
-%     % ÉTAPE 3: Arc length sur 0-6 Hz
-%     freqs = (0:K/2)' * (fs / K);
-%     f_c = 6;
-%     omega = 2 * pi * freqs;
-%     omega_c = 2 * pi * f_c;  % 6 Hz
-%     idx = find(omega <= omega_c);
-% 
-%     if length(idx) < 2
-%         sparc = NaN;
-%         return;
-%     end
-% 
-%     omega_seg = omega(idx);
-%     V_seg = Vn(idx);
-%     d_omega = diff(omega_seg);
-%     d_V = diff(V_seg);
-%     arc = sum(sqrt((d_omega / omega_c).^2 + d_V.^2));
-%     sparc = -arc;
-% 
-%     % VISUALISATION
-%     if doPlot
-%         figure('Name', 'Analyse spectrale SPARC', 'Color', 'w');
-% 
-%         % Subplot 1: Signal temporel
-%         subplot(3,1,1);
-%         t = (0:length(velocity)-1) / fs;
-%         plot(t, velocity, 'b-', 'LineWidth', 1.5);
-%         grid on; box on;
-%         xlabel('Temps (s)');
-%         ylabel('Vitesse (m/s)');
-%         title('Signal temporel');
-% 
-%         % Subplot 2: Spectre complet (0 à Nyquist)
-%         subplot(3,1,2);
-%         plot(freqs, Vn, 'k-', 'LineWidth', 1);
-%         hold on;
-%         xline(6, 'r--', 'LineWidth', 2, 'Label', '6 Hz (cutoff)');
-%         hold off;
-%         grid on; box on;
-%         xlabel('Fréquence (Hz)');
-%         ylabel('Magnitude normalisée');
-%         title('Spectre fréquentiel complet');
-%         xlim([0 min(50, fs/2)]);
-% 
-%         % Subplot 3: Spectre dans la bande SPARC (0-6 Hz) avec arc-length
-%         subplot(3,1,3);
-%         freq_seg = omega_seg / (2*pi);
-%         plot(freq_seg, V_seg, 'b-', 'LineWidth', 2);
-%         hold on;
-% 
-%         % Visualisation de l'arc-length
-%         plot(freq_seg, V_seg, 'ro', 'MarkerSize', 4, 'MarkerFaceColor', 'r');
-% 
-%         hold off;
-%         grid on; box on;
-%         xlabel('Fréquence (Hz)');
-%         ylabel('Magnitude normalisée');
-%         title(sprintf('Bande SPARC (0-6 Hz) | SPARC = %.3f | Arc-length = %.3f', sparc, arc));
-%         xlim([0 6]);
-% 
-%         % Titre global
-%         if ~isempty(plotTitle)
-%             sgtitle(plotTitle, 'FontSize', 12, 'FontWeight', 'bold');
-%         end
-%     end
-% end
-
 function ldlj = compute_LDLJ(velocity, fs) 
     if length(velocity) < 10 || all(isnan(velocity))
         ldlj = NaN;
@@ -446,8 +331,8 @@ function ldlj = compute_LDLJ(velocity, fs)
     velocity = velocity(:);
     dt       = 1 / fs;
     
-    acc  = gradient(velocity, dt);
-    jerk = gradient(acc, dt);
+    acc  = diff(velocity)/dt;
+    jerk = diff(acc)/dt;
     
     T      = (length(velocity) - 1) * dt;
     v_peak = max(abs(velocity));
