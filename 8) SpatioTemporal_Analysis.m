@@ -555,6 +555,8 @@ end
 disp('=== RÉSULTATS ===');
 disp('Structure SpatioTemporalDATA sauvegardée avec succès.');
 
+fprintf('\n💡 Plusieurs options désormais : Soit lancer Statisctics_SpatioTemporal_Parameters.m, soit Clustering.m, soit dresser des plots ci-dessous\n');
+
 %% RADAR PLOTS 5 DOMAINES - INTER ET INTRA -GROUPES
 clc; clear; close all;
 cd('C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\result');
@@ -600,6 +602,8 @@ end
 
 fprintf('\n✅ TOTAL: 7 radar plots générés (3 inter + 4 intra)\n');
 fprintf('📂 Sauvegardés dans: %s\n', save_path);
+
+fprintf('\n💡 PROCHAINE ÉTAPE : Dresser le nuage de points');
 
 %% NUAGE DE POINTS DE L'EVOLUTION DES PARAMETRES SPATIO-TEMPORELLES EN FONCTION DU TEMPS
 clc; clear; close all;
@@ -661,7 +665,15 @@ variables_to_plot = {
     'Mean_MoS ML HS (%L0)'
     'Mean_MoS AP Stance (%L0)'
     'Mean_MoS ML Stance (%L0)'
-    
+
+    % --- Smoothness ---
+    % Variables Smoothness - COM
+    'Mean_COM SPARC Magnitude (ua)';
+    'Mean_COM LDLJ Magnitude (ua)';
+    % Variables Smoothness - STERNUM
+    'Mean_STERN SPARC Magnitude (ua)';
+    'Mean_STERN LDLJ Magnitude (ua)';
+
     % --- Indices de symétrie ---
     'SI_Stride time (s)'
     'SI_Stride length (m)'
@@ -750,61 +762,6 @@ for i = 1:numel(variables_to_plot)
             'Marker', 'o', 'MarkerFaceColor', color, ...
             'CapSize', 6, ...
             'DisplayName', ['Moyenne ' cond_name]);
-
-        % % ---------- indice de stabilisation ----------
-        % % paramètres
-        % tol_rel = 0.10;   % 10% de marge
-        % tol_abs = [];     % laisse vide si tu veux que relatif
-        % minN    = 8;      % au moins 8 sujets dans la tranche
-        % 
-        % % on récupère la tranche la plus vieille (adultes)
-        % refIdx = nTranches;   % 216-432
-        % refVal = moyennes(refIdx);
-        % % compter le nb de sujets dans cette tranche
-        % idx_ref = data_cond.AgeMonths >= tranches(refIdx,1) & data_cond.AgeMonths < tranches(refIdx,2);
-        % n_ref   = sum(idx_ref);
-        % 
-        % stabAge = NaN;
-        % 
-        % if ~isnan(refVal) && n_ref >= minN
-        %     % on parcourt les tranches de la plus vieille vers la plus jeune
-        %     for it = nTranches-1 : -1 : 1
-        %         thisMean = moyennes(it);
-        % 
-        %         % nombre de sujets dans cette tranche
-        %         idx_it = data_cond.AgeMonths >= tranches(it,1) & data_cond.AgeMonths < tranches(it,2);
-        %         n_it   = sum(idx_it);
-        % 
-        %         if isnan(thisMean) || n_it < minN
-        %             continue; % pas assez de données -> on saute
-        %         end
-        % 
-        %         diff_abs = abs(thisMean - refVal);
-        %         diff_rel = diff_abs / abs(refVal);
-        % 
-        %         cond_rel = (diff_rel <= tol_rel);
-        %         cond_abs = false;
-        %         if ~isempty(tol_abs)
-        %             cond_abs = (diff_abs <= tol_abs);
-        %         end
-        % 
-        %         if cond_rel || cond_abs
-        %             % on accepte cette tranche comme "début de la stabilisation"
-        %             stabAge = tranches(it,1);   % début de la tranche
-        %         else
-        %             % dès qu'on rencontre une tranche trop différente,
-        %             % on arrête de remonter
-        %             break;
-        %         end
-        %     end
-        % end
-
-        % % affichage de la ligne de stabilisation si trouvée
-        % if ~isnan(stabAge)
-        %     xline(stabAge, '--', 'Color', color, 'LineWidth', 1.1, ...
-        %         'DisplayName', sprintf('%s stabilisation ~ %d mois', cond_name, stabAge));
-        % end
-
     end
 
     xlabel('Âge (mois)', 'FontSize', 12);

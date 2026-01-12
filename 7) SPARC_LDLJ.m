@@ -4,16 +4,16 @@
 
 clear; clc; close all;
 
-%% === CHEMINS ET PARAMÈTRES ===
+% === CHEMINS ET PARAMÈTRES ===
 addpath(genpath('C:\Users\silve\OneDrive - Universite de Montreal\Silvere De Freitas - PhD - NeuroBiomech\Scripts\btk'));    
 addpath(genpath('C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\functions'));
 
-sujet_id  = 'CTL_01';
+sujet_id  = 'CTL_77';
 surfaces  = {'Plat', 'Medium', 'High'};
-essais    = 1:10; % Attention entre les groupes !
-base_dir  = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\Data\enfants'; % Là où je vais chercher mes data
+essais    = 1:10; 
+base_dir  = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\Data\jeunes_enfants';
 
-freqVicon = 100; % La frequence d'acquisition du Vicon
+freqVicon = 100;
 fc_filter = 6;
 
 output_csv = sprintf('C:\\Users\\silve\\Desktop\\DOCTORAT\\UNIV MONTREAL\\TRAVAUX-THESE\\Surfaces_Irregulieres\\Datas\\Script\\gaitAnalysisGUI\\result\\Smoothness\\Smoothness_TrialBased_%s.csv', sujet_id);
@@ -22,16 +22,12 @@ output_mat = sprintf('C:\\Users\\silve\\Desktop\\DOCTORAT\\UNIV MONTREAL\\TRAVAU
 % === INITIALISATION ===
 results    = table();
 log_errors = {};
+fft_log    = table();  % journal FFT (N, K, df...) par essai
 fprintf('🔄 Analyse de fluidité PAR ESSAI, du 1er au dernier HeelStrike, pour %s...\n\n', sujet_id);
 fprintf('Colonne 1 : axe ML; colonne 2 : axe AP; colonne 3 : axe V\n');
 
 % Filtre passe-bas
 [b, a] = butter(2, fc_filter/(freqVicon/2), 'low');
-
-% === FLAG POUR VISUALISATION ===
-PLOT_SPECTRES = true;  % Mettre à false pour désactiver les plots
-MAX_PLOTS = 3;         % Nombre maximum de spectres à afficher
-plot_counter = 0;
 
 % === BOUCLE DE TRAITEMENT ===
 for surf_idx = 1:length(surfaces)
@@ -68,56 +64,47 @@ for surf_idx = 1:length(surfaces)
 
             % === STERNUM ===
             if isfield(markers,'STRN')
-                STERN = markers.STRN;     % [N x 3] Plug-in Gait sternum
+                STERN = markers.STRN;     % [N x 3]
             else
                 msg = sprintf('⚠️ %s : marqueur STRN absent, indices STERN mis à NaN', filename);
                 log_errors{end+1} = msg;
                 fprintf('%s\n', msg);
-                STERN = NaN(size(COM));   % même taille, rempli de NaN
+                STERN = NaN(size(COM));
             end
 
-            % === FENÊTRE D'ANALYSE : du 1er HS au dernier HS (toutes jambes confondues) ===
-            n_frames = size(COM, 1);
+            % === FENÊTRE D'ANALYSE : du 1er HS au dernier HS ===
+            n_frames   = size(COM, 1);
             fsrt_frame = btkGetFirstFrame(data);
             events     = btkGetEvents(data);
 
-            % HS gauche
+            Left_HS_frames  = [];
+            Right_HS_frames = [];
             if isfield(events, 'Left_Foot_Strike')
                 Left_HS_frames = round(events.Left_Foot_Strike * freqVicon - fsrt_frame + 1);
-            else
-                Left_HS_frames = [];
             end
-
-            % HS droite
             if isfield(events, 'Right_Foot_Strike')
                 Right_HS_frames = round(events.Right_Foot_Strike * freqVicon - fsrt_frame + 1);
-            else
-                Right_HS_frames = [];
             end
 
             HS_all = sort([Left_HS_frames(:); Right_HS_frames(:)]);
 
             % Clip de sécurité dans [1, n_frames]
-            clipHS = @(v) max(1, min(v, n_frames));
-            HS_all = clipHS(HS_all);
+            HS_all = max(1, min(HS_all, n_frames));
 
             if numel(HS_all) >= 2
                 start_frame = HS_all(1);
                 end_frame   = HS_all(end);
             else
-                % Fallback : si pas (ou pas assez) d'événements HS -> essai complet
                 start_frame = 1;
                 end_frame   = n_frames;
             end
 
-            % Sécurité finale : éviter fenêtre inversée / trop courte
             if end_frame <= start_frame
                 start_frame = 1;
                 end_frame   = n_frames;
             end
 
             n_cycles = NaN;
-
             fprintf('   📏 Analyse entre 1er HS et dernier HS (frames %d à %d)\n', start_frame, end_frame);
 
             % === FILTRAGE POSITION ===
@@ -126,8 +113,20 @@ for surf_idx = 1:length(surfaces)
 
             % === VITESSES ===
             vel_COM   = calculate_velocities(COM_filt,   freqVicon); 
+            vel_STERN = calculate_velocities(STERN_filt, freqVicon);
 
-            vel_STERN = calculate_velocities(STERN_filt, freqVicon);  % (NaN si STRN absent)
+            % === FFT SUR LA FENÊTRE 1er HS -> dernier HS (MAGNITUDE UNIQUEMENT) ===
+            seg_COM     = vel_COM(start_frame:end_frame, :);
+            v_mag_COM   = sqrt(sum(seg_COM.^2, 2));
+            [~, ~, infoCOM] = compute_spectrum_with_info(v_mag_COM, freqVicon, 4); % mean retiré dans la fonction
+            fft_log = [fft_log; make_fft_row(sujet_id, surface, essai, 'COM', start_frame, end_frame, infoCOM)];
+
+            if ~all(isnan(vel_STERN(:)))
+                seg_STERN   = vel_STERN(start_frame:end_frame, :);
+                v_mag_STERN = sqrt(sum(seg_STERN.^2, 2));
+                [~, ~, infoSTERN] = compute_spectrum_with_info(v_mag_STERN, freqVicon, 4); % mean retiré dans la fonction
+                fft_log = [fft_log; make_fft_row(sujet_id, surface, essai, 'STERN', start_frame, end_frame, infoSTERN)];
+            end
 
             % === INDICES DE FLUIDITÉ ===
             smooth_COM   = calculate_smoothness_indices(vel_COM,   start_frame, end_frame, freqVicon);
@@ -165,13 +164,11 @@ for surf_idx = 1:length(surfaces)
             new_row.Duration_frames  = end_frame - start_frame + 1;
             new_row.Duration_sec     = new_row.Duration_frames / freqVicon;
 
-            % Ajout COM_*
             for f = 1:length(fields_COM)
                 fname = fields_COM{f};
                 new_row.(sprintf('COM_%s', fname)) = smooth_COM.(fname);
             end
 
-            % Ajout STERN_*
             for f = 1:length(fields_STERN)
                 fname = fields_STERN{f};
                 new_row.(sprintf('STERN_%s', fname)) = smooth_STERN.(fname);
@@ -179,15 +176,14 @@ for surf_idx = 1:length(surfaces)
 
             results = [results; struct2table(new_row)];
 
-            % Fermeture BTK
             btkCloseAcquisition(data);
-            
             fprintf('   ✅ Essai traité : durée %.1f sec\n\n', new_row.Duration_sec);
             
         catch ME
             msg = sprintf('❌ %s : %s', filename, ME.message);
             log_errors{end+1} = msg;
             fprintf('%s\n\n', msg);
+            try, btkCloseAcquisition(data); end %#ok<TRYNC>
         end
     end
 end
@@ -195,15 +191,16 @@ end
 % === SAUVEGARDE ===
 fprintf('💾 Sauvegarde...\n');
 
-% .CSV
 writetable(results, output_csv);
-% .MAT
-save(output_mat, 'results', 'log_errors');
+
+save(output_mat, 'results', 'log_errors', 'fft_log');
 
 nTrials = height(results);
 fprintf('📊 Total essais traités : %d\n', nTrials);
-
 fprintf('\n💡 PROCHAINE ÉTAPE : Lancer SpatioTemporal_Analysis.m\n');
+
+%% === VISUALISATION FFT COM (MAGNITUDE) – Essai voulu ===
+plot_fft_COM_magnitude_trial(base_dir, sujet_id, surfaces, 3, freqVicon, fc_filter); % changer chiffre pour changer essai
 
 %% === FIGURES COMPARATIVES COM vs STERN ===
 
@@ -234,14 +231,6 @@ for m = 1:numel(metrics_to_plot)
             metricName, comField, sternField);
     end
 end
-
-%% === COMPARAISON DES SPECTRES PAR SURFACE ===
-fprintf('\n\n🎨 === ANALYSE SPECTRALE COMPARATIVE ===\n');
-
-% Appel de la fonction de comparaison
-compare_spectres_surfaces(base_dir, sujet_id, surfaces, essais, freqVicon, fc_filter);
-
-fprintf('📊 Analyse spectrale terminée!\n\n');
 
 %% ============================== FONCTIONS ==============================
 
@@ -280,7 +269,6 @@ function vel = calculate_velocities(pos, fs)
 end
 
 function smoothness = calculate_smoothness_indices(vel, i1, i2, fs)
-    % Si vel contient des NaN (ex STRN absent) => tout à NaN
     if all(isnan(vel(:)))
         smoothness.SPARC_AP        = NaN;
         smoothness.SPARC_ML        = NaN;
@@ -293,32 +281,34 @@ function smoothness = calculate_smoothness_indices(vel, i1, i2, fs)
         return;
     end
 
-    % --- Paramètres SPARC ---
     Ts = 1/fs;
     ampThreshold = 0.05;
-    fMaxHz       = 6;   % cohérent avec passe-bas à 6 Hz et analyse de marche
+    fMaxHz       = 6;
     zeroPadIdx   = 4;
     params       = [ampThreshold, fMaxHz, zeroPadIdx];
 
     directions = {'ML','AP','V'};
 
-    % === SPARC et LDLJ par direction ===
     for d = 1:3
         v_seg = vel(i1:i2, d);
 
-        % IMPORTANT: SpectralArcLength attend un vecteur vitesse (speed) en LIGNE 1xN
-        % abs(...) pour avoir un speed positif
-        speed = abs(v_seg(:))';  % 1xN
-
+        % ===== SPARC =====
+        speed = v_seg(:)';  % row vector, SANS abs(), SANS retrait de moyenne ici
         smoothness.(sprintf('SPARC_%s', directions{d})) = SpectralArcLength(speed, Ts, params);
-        smoothness.(sprintf('LDLJ_%s',  directions{d})) = compute_LDLJ(abs(v_seg), fs);
+
+        % ===== LDLJ (sans retrait de moyenne, sans abs) =====
+        smoothness.(sprintf('LDLJ_%s', directions{d}))  = compute_LDLJ(v_seg, fs);
     end
 
-    % === Magnitude 3D ===
-    v_mag = sqrt(sum(vel(i1:i2,:).^2, 2));
-    speed3D = v_mag(:)';  % 1xN
+    % ===== Magnitude vitesse =====
+v_mag = sqrt(sum(vel(i1:i2,:).^2, 2));
 
+    % SPARC magnitude
+    % Le retrait de moyenne sera fait dans SpectralArcLength
+    speed3D = v_mag(:)';  
     smoothness.SPARC_Magnitude = SpectralArcLength(speed3D, Ts, params);
+
+    % LDLJ magnitude (sans retrait de moyenne, sans abs)
     smoothness.LDLJ_Magnitude  = compute_LDLJ(v_mag, fs);
 end
 
@@ -331,8 +321,8 @@ function ldlj = compute_LDLJ(velocity, fs)
     velocity = velocity(:);
     dt       = 1 / fs;
     
-    acc  = diff(velocity)/dt;
-    jerk = diff(acc)/dt;
+    acc  = gradient(velocity,dt);
+    jerk = gradient(acc,dt);
     
     T      = (length(velocity) - 1) * dt;
     v_peak = max(abs(velocity));
@@ -346,6 +336,158 @@ function ldlj = compute_LDLJ(velocity, fs)
     D          = (T^5 / v_peak^2) * integral_j;
     
     ldlj = -log(D + eps);
+end
+
+function [freqs, Vn] = compute_spectrum(x, fs)
+% FFT one-sided, mean retiré, normalisée par le max du spectre (style SPARC)
+% zero-padding fixe +4 (cohérent SPARC)
+    x = x(:);
+
+    if numel(x) < 2 || all(isnan(x))
+        freqs = NaN; 
+        Vn    = NaN;
+        return;
+    end
+
+    x = x - mean(x, 'omitnan'); % retrait DC
+
+    N   = numel(x);
+    Nfft = 2^(ceil(log2(N)) + 4); 
+
+    Sp = abs(fft(x, Nfft));   % full spectrum
+    denom = max(Sp);
+    if denom < 1e-10, denom = 1e-10; end
+    Sp = Sp / denom;          % normalisation par max (SPARC-like)
+
+    Vn    = Sp(1:Nfft/2+1)';  % one-sided
+    freqs = (0:Nfft/2)' * (fs / Nfft);
+end
+
+function [freqs, Vn, info] = compute_spectrum_with_info(x, fs, zeroPadPow2)
+% FFT one-sided normalisée par max du spectre + log des tailles/résolution
+% mean retiré ici pour cohérence avec SPARC/FFT
+    x = x(:);
+    N = length(x);
+
+    if N < 2 || all(isnan(x))
+        freqs = NaN; Vn = NaN;
+        info = struct('N',N,'K',NaN,'df',NaN,'lenSpec',NaN);
+        return;
+    end
+
+    x = x - mean(x, 'omitnan'); % retrait DC
+
+    K = 2^(ceil(log2(N)) + zeroPadPow2);
+    V = abs(fft(x, K));
+    V = V(1:K/2+1);
+
+    denom = max(V);
+    if denom < 1e-10, denom = 1e-10; end
+    Vn = V / denom;            % normalisation par max du spectre
+
+    freqs = (0:K/2)' * (fs / K);
+
+    info.N = N;
+    info.K = K;
+    info.df = fs / K;
+    info.lenSpec = length(Vn);
+end
+
+function row = make_fft_row(sujet_id, surface, essai, signalName, start_frame, end_frame, info)
+    row = table( string(sujet_id), string(surface), essai, string(signalName), ...
+                 start_frame, end_frame, (end_frame-start_frame+1), ...
+                 info.N, info.K, info.lenSpec, info.df, ...
+                 'VariableNames', {'Sujet','Surface','Essai','Signal', ...
+                                   'Start_Frame','End_Frame','Duration_frames', ...
+                                   'N','K','LenSpectrum','df_Hz'} );
+end
+
+function plot_fft_COM_magnitude_trial(base_dir, sujet_id, surfaces, essai, fs, fc_filter)
+% FFT de la MAGNITUDE de la vitesse COM (fenêtre 1er HS -> dernier HS)
+% Visualisation Plat / Medium / High pour un essai donné
+
+    [b, a] = butter(2, fc_filter/(fs/2), 'low');
+
+    figure('Name', sprintf('FFT COM – Magnitude – Essai %02d', essai), ...
+           'Color','w', 'Position',[200 200 900 600]);
+    hold on; box on; grid on;
+
+    colors = lines(numel(surfaces));
+    leg = {};
+
+    for s = 1:numel(surfaces)
+        surface = surfaces{s};
+        filename = sprintf('%s_%s_%02d.c3d', sujet_id, surface, essai);
+        c3d_path = fullfile(base_dir, filename);
+
+        if ~isfile(c3d_path)
+            fprintf('❌ Manquant: %s\n', filename);
+            continue;
+        end
+
+        try
+            data    = btkReadAcquisition(c3d_path);
+            markers = btkGetMarkers(data);
+
+            COM = calculate_pelvic_COM(markers);
+            COM_filt = filtfilt(b, a, COM);
+            vel_COM  = calculate_velocities(COM_filt, fs);
+
+            n_frames   = size(COM,1);
+            fsrt_frame = btkGetFirstFrame(data);
+            events     = btkGetEvents(data);
+
+            LHS = []; RHS = [];
+            if isfield(events,'Left_Foot_Strike')
+                LHS = round(events.Left_Foot_Strike * fs - fsrt_frame + 1);
+            end
+            if isfield(events,'Right_Foot_Strike')
+                RHS = round(events.Right_Foot_Strike * fs - fsrt_frame + 1);
+            end
+
+            HS_all = sort([LHS(:); RHS(:)]);
+            HS_all = max(1, min(HS_all, n_frames));
+
+            if numel(HS_all) >= 2
+                start_frame = HS_all(1);
+                end_frame   = HS_all(end);
+            else
+                start_frame = 1;
+                end_frame   = n_frames;
+            end
+
+            if end_frame <= start_frame
+                start_frame = 1;
+                end_frame   = n_frames;
+            end
+
+            seg_COM = vel_COM(start_frame:end_frame, :);
+            v_mag   = sqrt(sum(seg_COM.^2, 2));
+
+            % IMPORTANT: mean retiré dans compute_spectrum -> ne pas le refaire ici
+            [freqs, Vn] = compute_spectrum(v_mag, fs);
+
+            idx = freqs <= 12;
+            plot(freqs(idx), Vn(idx), 'LineWidth', 2, 'Color', colors(s,:));
+            leg{end+1} = sprintf('%s (N=%d)', surface, length(v_mag));
+
+            btkCloseAcquisition(data);
+
+        catch ME
+            warning('Erreur %s : %s', filename, ME.message);
+            try, btkCloseAcquisition(data); end %#ok<TRYNC>
+        end
+    end
+
+    xline(6, 'k--', 'LineWidth', 1.5, 'Alpha', 0.7);
+    xlabel('Fréquence (Hz)', 'FontSize', 12);
+    ylabel('Magnitude normalisée (max spectre)', 'FontSize', 12);
+    title(sprintf('FFT COM – Magnitude vitesse – Essai %02d (1er HS → dernier HS)', essai), ...
+          'FontSize', 13, 'FontWeight','bold');
+    xlim([0 12]);
+    ylim([0 inf]);
+    legend(leg, 'Location','northeast');
+    hold off;
 end
 
 % LOCAL FUNCTION FROM GITHUB: https://github.com/siva82kb/smoothness/blob/master/matlab/SpectralArcLength.m
@@ -431,6 +573,8 @@ if length(parameters) ~= 3
 end
 
 % Calculate the spectrum of the speed profile.
+speed = speed - mean(speed);
+
 N = length(speed);
 Nfft = 2^(ceil(log2(N))+parameters(3));
 speedSpectrum = abs(fft( speed, Nfft ));
@@ -580,290 +724,4 @@ function plot_COM_vs_STERN(results, metricFieldBase)
     title(sprintf('COM vs STERN - %s', metricFieldBase), 'Interpreter','none');
 
     hold off;
-end
-
-function compare_spectres_surfaces(base_dir, sujet_id, surfaces, essais, freqVicon, fc_filter)
-% Compare les spectres fréquentiels entre les 3 surfaces
-% Pour COM et STERN, directions AP, ML, V et Magnitude
-%
-% CORRECTION: Utilise une grille de fréquences commune pour éviter les
-% erreurs de dimensions lors de la concaténation des spectres
-
-    % Filtre passe-bas
-    [b, a] = butter(2, fc_filter/(freqVicon/2), 'low');
-    
-    % Couleurs pour chaque surface
-    colors = struct();
-    colors.Plat = [0.2 0.6 0.2];    % Vert
-    colors.Medium = [0.9 0.6 0.1];   % Orange
-    colors.High = [0.8 0.2 0.2];     % Rouge
-    
-    % Stockage des spectres moyens par surface
-    spectres_COM = struct();
-    spectres_STERN = struct();
-    directions = {'AP', 'ML', 'V', 'Magnitude'};
-    
-    % CORRECTION: Grille de fréquences commune pour interpolation (0 à 50 Hz par pas de 0.1 Hz)
-    % Cela garantit que tous les spectres ont exactement la même longueur
-    freqs_common = (0:0.1:50)';
-    
-    % Initialisation
-    for surf_idx = 1:length(surfaces)
-        surf = surfaces{surf_idx};
-        for d = 1:length(directions)
-            dir = directions{d};
-            spectres_COM.(surf).(dir) = [];
-            spectres_STERN.(surf).(dir) = [];
-        end
-    end
-    
-    % === COLLECTE DES DONNÉES ===
-    fprintf('\n🔍 Collecte des spectres pour comparaison...\n');
-    
-    for surf_idx = 1:length(surfaces)
-        surface = surfaces{surf_idx};
-        fprintf('  📊 Surface: %s\n', surface);
-        
-        for essai = essais
-            filename = sprintf('%s_%s_%02d.c3d', sujet_id, surface, essai);
-            c3d_path = fullfile(base_dir, filename);
-            
-            if ~isfile(c3d_path)
-                continue;
-            end
-            
-            try
-                % Lecture C3D
-                data = btkReadAcquisition(c3d_path);
-                markers = btkGetMarkers(data);
-                
-                % COM
-                COM = calculate_pelvic_COM(markers);
-                COM_filt = filtfilt(b, a, COM);
-                vel_COM = calculate_velocities(COM_filt, freqVicon);
-                
-                % STERNUM
-                if isfield(markers,'STRN')
-                    STERN = markers.STRN;
-                    STERN_filt = filtfilt(b, a, STERN);
-                    vel_STERN = calculate_velocities(STERN_filt, freqVicon);
-                else
-                    vel_STERN = NaN(size(vel_COM));
-                end
-                
-                % Calcul des spectres pour chaque direction
-                for d = 1:3
-                    dir = directions{d};
-                    
-                    % COM
-                    [freqs, Vn_COM] = compute_spectrum(abs(vel_COM(:,d)), freqVicon);
-                    % CORRECTION: Interpolation sur la grille commune
-                    Vn_COM_interp = interp1(freqs, Vn_COM, freqs_common, 'linear', 0);
-                    spectres_COM.(surface).(dir) = [spectres_COM.(surface).(dir); Vn_COM_interp'];
-                    
-                    % STERN
-                    if ~all(isnan(vel_STERN(:)))
-                        [~, Vn_STERN] = compute_spectrum(abs(vel_STERN(:,d)), freqVicon);
-                        % CORRECTION: Interpolation sur la grille commune
-                        Vn_STERN_interp = interp1(freqs, Vn_STERN, freqs_common, 'linear', 0);
-                        spectres_STERN.(surface).(dir) = [spectres_STERN.(surface).(dir); Vn_STERN_interp'];
-                    end
-                end
-                
-                % Magnitude
-                v_mag_COM = sqrt(sum(vel_COM.^2, 2));
-                [freqs, Vn_mag_COM] = compute_spectrum(v_mag_COM, freqVicon);
-                % CORRECTION: Interpolation sur la grille commune
-                Vn_mag_COM_interp = interp1(freqs, Vn_mag_COM, freqs_common, 'linear', 0);
-                spectres_COM.(surface).Magnitude = [spectres_COM.(surface).Magnitude; Vn_mag_COM_interp'];
-                
-                if ~all(isnan(vel_STERN(:)))
-                    v_mag_STERN = sqrt(sum(vel_STERN.^2, 2));
-                    [~, Vn_mag_STERN] = compute_spectrum(v_mag_STERN, freqVicon);
-                    % CORRECTION: Interpolation sur la grille commune
-                    Vn_mag_STERN_interp = interp1(freqs, Vn_mag_STERN, freqs_common, 'linear', 0);
-                    spectres_STERN.(surface).Magnitude = [spectres_STERN.(surface).Magnitude; Vn_mag_STERN_interp'];
-                end
-                
-                btkCloseAcquisition(data);
-                
-            catch ME
-                warning('Erreur lors du traitement de %s: %s', filename, ME.message);
-                continue;
-            end
-        end
-    end
-    
-    % === CRÉATION DES FIGURES ===
-    fprintf('\n📈 Création des figures comparatives...\n');
-    
-    % Figure 1: COM - toutes directions
-    plot_comparison_figure(spectres_COM, freqs_common, surfaces, colors, 'COM', directions);
-    
-    % Figure 2: STERN - toutes directions
-    plot_comparison_figure(spectres_STERN, freqs_common, surfaces, colors, 'STERNUM', directions);
-    
-    % Figure 3: COM vs STERN par direction
-    plot_COM_vs_STERN_spectres(spectres_COM, spectres_STERN, freqs_common, surfaces, colors, directions);
-    
-    fprintf('✅ Figures créées!\n');
-end
-
-%  === FONCTION: CALCUL DU SPECTRE ===
-function [freqs, Vn] = compute_spectrum(velocity, fs)
-% Calcule le spectre de puissance normalisé d'un signal de vitesse
-% Retourne les fréquences et les magnitudes normalisées
-
-    velocity = velocity(:);
-    
-    % FFT avec zero-padding (identique à compute_SPARC)
-    N = length(velocity);
-    K = 2^(nextpow2(N) + 4);
-    V = abs(fft(velocity, K));
-    V = V(1:K/2+1);
-    
-    % Normalisation par la composante DC
-    V0 = max(V(1), 1e-10);
-    Vn = V / V0;
-    
-    % Vecteur de fréquences
-    freqs = (0:K/2)' * (fs / K);
-end
-
-% === FONCTION: FIGURE DE COMPARAISON ===
-function plot_comparison_figure(spectres, freqs, surfaces, colors, label, directions)
-% Crée une figure 2x2 comparant les spectres des 3 surfaces
-% pour chaque direction (AP, ML, V, Magnitude)
-    
-    figure('Name', sprintf('Comparaison Spectres - %s', label), ...
-           'Position', [100 100 1600 900], 'Color', 'w');
-    
-    for d = 1:length(directions)
-        dir = directions{d};
-        subplot(2, 2, d);
-        hold on; box on; grid on;
-        
-        leg_entries = {};
-        
-        for surf_idx = 1:length(surfaces)
-            surf = surfaces{surf_idx};
-            
-            if isempty(spectres.(surf).(dir))
-                continue;
-            end
-            
-            % Calcul de la moyenne et écart-type sur les essais
-            mean_spectrum = mean(spectres.(surf).(dir), 1, 'omitnan');
-            std_spectrum = std(spectres.(surf).(dir), 0, 1, 'omitnan');
-            
-            % Limiter à 0-12 Hz pour visualisation
-            idx_plot = freqs <= 12;
-            f_plot = freqs(idx_plot);
-            m_plot = mean_spectrum(idx_plot);
-            s_plot = std_spectrum(idx_plot);
-            
-            % Plot moyenne avec zone d'écart-type
-            col = colors.(surf);
-            
-            % Zone d'écart-type (transparente)
-            fill([f_plot; flipud(f_plot)], ...
-                 [m_plot' + s_plot'; flipud(m_plot' - s_plot')], ...
-                 col, 'FaceAlpha', 0.15, 'EdgeColor', 'none');
-            
-            % Ligne moyenne (épaisse)
-            plot(f_plot, m_plot, '-', 'Color', col, 'LineWidth', 2.5);
-            
-            leg_entries{end+1} = surf;
-        end
-        
-        % Ligne verticale à 6 Hz (limite SPARC)
-        xline(6, 'k--', 'LineWidth', 1.5, 'Alpha', 0.7);
-        
-        xlabel('Fréquence (Hz)', 'FontSize', 11);
-        ylabel('Magnitude normalisée', 'FontSize', 11);
-        title(sprintf('%s - %s', label, dir), 'FontSize', 12, 'FontWeight', 'bold');
-        xlim([0 12]);
-        ylim([0 inf]);
-        
-        if ~isempty(leg_entries)
-            legend(leg_entries, 'Location', 'northeast', 'FontSize', 10);
-        end
-        
-        hold off;
-    end
-    
-    sgtitle(sprintf('Comparaison des spectres fréquentiels - %s (moyenne ± SD)', label), ...
-            'FontSize', 14, 'FontWeight', 'bold');
-end
-
-% === FONCTION: COM vs STERN PAR SURFACE ===
-function plot_COM_vs_STERN_spectres(spectres_COM, spectres_STERN, freqs, surfaces, colors, directions)
-% Crée une figure par surface comparant COM vs STERN
-% pour les 4 directions (AP, ML, V, Magnitude)
-    
-    % Une figure par surface
-    for surf_idx = 1:length(surfaces)
-        surf = surfaces{surf_idx};
-        
-        figure('Name', sprintf('COM vs STERN - %s', surf), ...
-               'Position', [100 100 1600 900], 'Color', 'w');
-        
-        col_COM = [0.2 0.4 0.8];
-        col_STERN = [0.9 0.5 0.1];
-        
-        for d = 1:length(directions)
-            dir = directions{d};
-            subplot(2, 2, d);
-            hold on; box on; grid on;
-            
-            % COM
-            if ~isempty(spectres_COM.(surf).(dir))
-                mean_COM = mean(spectres_COM.(surf).(dir), 1, 'omitnan');
-                std_COM = std(spectres_COM.(surf).(dir), 0, 1, 'omitnan');
-                
-                idx_plot = freqs <= 12;
-                f_plot = freqs(idx_plot);
-                
-                % Zone d'écart-type COM
-                fill([f_plot; flipud(f_plot)], ...
-                     [mean_COM(idx_plot)' + std_COM(idx_plot)'; ...
-                      flipud(mean_COM(idx_plot)' - std_COM(idx_plot)')], ...
-                     col_COM, 'FaceAlpha', 0.15, 'EdgeColor', 'none');
-                
-                plot(f_plot, mean_COM(idx_plot), '-', 'Color', col_COM, 'LineWidth', 2.5);
-            end
-            
-            % STERN
-            if ~isempty(spectres_STERN.(surf).(dir))
-                mean_STERN = mean(spectres_STERN.(surf).(dir), 1, 'omitnan');
-                std_STERN = std(spectres_STERN.(surf).(dir), 0, 1, 'omitnan');
-                
-                idx_plot = freqs <= 12;
-                f_plot = freqs(idx_plot);
-                
-                % Zone d'écart-type STERN
-                fill([f_plot; flipud(f_plot)], ...
-                     [mean_STERN(idx_plot)' + std_STERN(idx_plot)'; ...
-                      flipud(mean_STERN(idx_plot)' - std_STERN(idx_plot)')], ...
-                     col_STERN, 'FaceAlpha', 0.15, 'EdgeColor', 'none');
-                
-                plot(f_plot, mean_STERN(idx_plot), '-', 'Color', col_STERN, 'LineWidth', 2.5);
-            end
-            
-            % Ligne verticale à 20 Hz
-            xline(6, 'k--', 'LineWidth', 1.5, 'Alpha', 0.7);
-            
-            xlabel('Fréquence (Hz)', 'FontSize', 11);
-            ylabel('Magnitude normalisée', 'FontSize', 11);
-            title(sprintf('%s', dir), 'FontSize', 12, 'FontWeight', 'bold');
-            xlim([0 12]);
-            ylim([0 inf]);
-            legend({'COM', 'STERNUM'}, 'Location', 'northeast', 'FontSize', 10);
-            
-            hold off;
-        end
-        
-        sgtitle(sprintf('COM vs STERNUM - Surface %s (moyenne ± SD)', surf), ...
-                'FontSize', 14, 'FontWeight', 'bold');
-    end
 end
