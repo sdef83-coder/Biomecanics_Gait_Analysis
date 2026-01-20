@@ -20,13 +20,10 @@ if ~exist(stats_path, 'dir'), mkdir(stats_path); end
 surfaces = {'Plat', 'Medium', 'High'};
 groups   = {'JeunesEnfants', 'Enfants', 'Adolescents', 'Adultes'};
 
-% Choix méthodologiques
-FIT_METHOD = 'REML';            % 'REML' ou 'ML'
-DF_METHOD  = 'Satterthwaite';   % si non supporté back off vers 'Residual'
-
 variables_to_test = {
     % --- Paramètres spatio-temporelles ---
     'Mean_Single support time (%)'
+    'Mean_ToeOff (%)'
     'Mean_Double support time (%)'
     'Mean_BaseOfSupport (cm)'
     'Mean_StepWidth (cm)'
@@ -43,6 +40,7 @@ variables_to_test = {
 
     % --- Variabilité ---
     'CV_Single support time (%)'
+    'CV_ToeOff (%)'
     'CV_Double support time (%)'
     'CV_BaseOfSupport (cm)'
     'CV_StepWidth (cm)'
@@ -73,6 +71,9 @@ variables_to_test = {
     'Mean_STERN SPARC Magnitude (ua)'
     'Mean_STERN LDLJ Magnitude (ua)'
 
+    % --- GVI ---
+    'Mean_GVI (ua)'
+
     % --- Indices de symétrie ---
     'SI_Stride time (s)'
     'SI_Stride length (m)'
@@ -88,8 +89,8 @@ variables_to_test = {
     'SI_Norm StepWidth (ua)'
 };
 
-%% =============== Préparation des données (format long) ===============
-fprintf('=== PRÉPARATION DES DONNÉES & EXPORT DATA FORMAT LONG ===\n');
+%% =============== EXPORT des données (format long .csv) ===============
+fprintf('=== EXPORT DATA FORMAT LONG ===\n');
 
 % Fusion de toutes les conditions
 DATA_all = [SpatioTemporalDATA.ALL.Plat;
@@ -185,3 +186,5 @@ for k = 1:numel(catNames)
 end
 writetable(DATA_all_csv, fullfile(prep_path, 'DATA_all_prepared.csv'));
 fprintf('✓ DATA_all_prepared.csv sauvegardé\n');
+
+%%

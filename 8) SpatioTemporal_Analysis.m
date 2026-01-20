@@ -5,6 +5,7 @@
 clc;
 clear;
 close all;
+
 cd('C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\result\matfiles\ALL')
 addpath(genpath('C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\functions'))
 addpath(genpath('C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script'))
@@ -12,6 +13,7 @@ addpath(genpath('C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Sur
 % Dossier où sont sauvegardés les résultats MoS et SPARC par participant
 mos_dir = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\result\MoS';
 smooth_dir = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\result\Smoothness';
+gvi_dir = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\result\GVI\GVI_AllSurfaces_RefAdultsPlat';
 
 % Chemin de sauvegarde
 save_path = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\result';
@@ -23,10 +25,10 @@ end
 ParticipantGroup;
 Condition = {'Plat', 'Medium', 'High'};
 % === Dictionnaire de renommage des variables ===
-oldNames = {'pctSimpleAppuie', 'DoubleSupport','LargeurPas','vitFoulee','distFoulee', 'tempsFoulee', ...
+oldNames = {'pctSimpleAppuie', 'pctToeOff', 'DoubleSupport','LargeurPas','vitFoulee','distFoulee', 'tempsFoulee', ...
             'NormWalkRatio','vitCadencePasParMinute','NormStepLength','NormCadence', 'stepWidthHeel', 'NormStepWidthHeel', 'NormWalkSpeed'};
 
-newNames = {'Single support time (%)', 'Double support time (%)','BaseOfSupport (cm)', ...
+newNames = {'Single support time (%)', 'ToeOff (%)','Double support time (%)','BaseOfSupport (cm)', ...
             'Gait speed (m.s^{-1})','Stride length (m)', 'Stride time (s)', ...
             'Norm WR (ua)','Cadence (step.min^{-1})', ...
             'Norm Step length (ua)', 'Norm Cadence (ua)', 'StepWidth (cm)', 'Norm StepWidth (ua)', 'Norm Gait Speed (m.s^{-1})'};
@@ -64,6 +66,9 @@ renameMap('STERN_LDLJ_AP')         = 'STERN LDLJ AP (ua)';
 renameMap('STERN_LDLJ_ML')         = 'STERN LDLJ ML (ua)';
 renameMap('STERN_LDLJ_V')          = 'STERN LDLJ V (ua)';
 renameMap('STERN_LDLJ_Magnitude')  = 'STERN LDLJ Magnitude (ua)';
+
+% Variable GVI
+renameMap('GVI') = 'GVI (ua)';
 
 prefixes = {'Mean_', 'CV_'};
 
@@ -163,6 +168,20 @@ catch ME
     % Les champs restent NaN (déjà initialisés par défaut)
 end
 % ==== fin Récup Smoothness ===
+
+% ==== Récup GVI pour ce participant et cette condition ====
+try
+    gvi_val = get_gvi_value(participant, cond, gvi_dir);
+    row.Mean_GVI = gvi_val;
+    
+    % Garde aussi dans DATA
+    DATA.(participant).(cond).GVI = gvi_val;
+    
+catch ME
+    warning('Erreur GVI pour %s - %s : %s', participant, cond, ME.message);
+    row.Mean_GVI = NaN;
+end
+% ==== fin Récup GVI ===
 
                 % Nombre de cycles
                 nCyclesLeft = size(data.c.resultsAll.kin.Left, 2);
@@ -403,9 +422,13 @@ smoothReadable = {'COM SPARC AP (ua)', 'COM SPARC ML (ua)', 'COM SPARC V (ua)', 
     'STERN SPARC AP (ua)', 'STERN SPARC ML (ua)', 'STERN SPARC V (ua)', 'STERN SPARC Magnitude (ua)', ...
     'STERN LDLJ AP (ua)', 'STERN LDLJ ML (ua)', 'STERN LDLJ V (ua)', 'STERN LDLJ Magnitude (ua)'};
 
-% Fusion avec les autres variables
-originalNames = [originalNames, mosTech, smoothTech];
-newNamesAll   = [newNamesBase, mosReadable, smoothReadable];
+% Ajoute GVI aux variables à exporter
+gviTech = {'GVI'};
+gviReadable = {'GVI (ua)'};
+
+% Fusion avec les autres variables (après smoothness)
+originalNames = [originalNames, mosTech, smoothTech, gviTech];
+newNamesAll   = [newNamesBase, mosReadable, smoothReadable, gviReadable];
 
 % Map OK (même longueur des deux côtés)
 renameMapExport = containers.Map(originalNames, newNamesAll);
@@ -673,6 +696,9 @@ variables_to_plot = {
     % Variables Smoothness - STERNUM
     'Mean_STERN SPARC Magnitude (ua)';
     'Mean_STERN LDLJ Magnitude (ua)';
+
+    % --- GVI ---
+    'Mean_GVI (ua)'
 
     % --- Indices de symétrie ---
     'SI_Stride time (s)'
@@ -986,4 +1012,59 @@ function smoothAgg = get_smoothness_aggregates(participant, cond, smooth_dir)
     if ismember('STERN_LDLJ_Magnitude', T.Properties.VariableNames)
         smoothAgg.STERN_LDLJ_Magnitude = mean(T.STERN_LDLJ_Magnitude, 'omitnan');
     end
+end
+
+function gvi_value = get_gvi_value(participant, cond, gvi_dir)
+% Retourne le GVI pour un participant et une surface donnée
+% - Lit le fichier CSV GVI_AllSurfaces_Individual_*.csv le plus récent
+% - Filtre par Participant et Surface
+% - Retourne NaN si donnée manquante
+
+    % Initialisation avec NaN par défaut
+    gvi_value = NaN;
+    
+    % Recherche du fichier CSV le plus récent
+    files = dir(fullfile(gvi_dir, 'GVI_AllSurfaces_Individual_*.csv'));
+    
+    if isempty(files)
+        warning('Aucun fichier GVI trouvé dans : %s', gvi_dir);
+        return;
+    end
+    
+    % Trier par date et prendre le plus récent
+    [~, idx] = max([files.datenum]);
+    gvi_file = fullfile(gvi_dir, files(idx).name);
+    
+    % Chargement du fichier CSV
+    try
+        T = readtable(gvi_file);
+    catch ME
+        warning('Erreur de lecture du fichier GVI: %s', ME.message);
+        return;
+    end
+    
+    % Vérification des colonnes nécessaires
+    if ~all(ismember({'Participant', 'Surface', 'GVI'}, T.Properties.VariableNames))
+        warning('Le fichier GVI ne contient pas les colonnes requises');
+        return;
+    end
+    
+    % Filtrage par participant et surface
+    idx = strcmp(T.Participant, participant) & strcmp(T.Surface, cond);
+    
+    if ~any(idx)
+        warning('GVI non trouvé pour %s - %s', participant, cond);
+        return;
+    end
+    
+    % Extraction de la valeur GVI
+    gvi_value = T.GVI(idx);
+    
+    % Si plusieurs lignes (ne devrait pas arriver), prendre la moyenne
+    if numel(gvi_value) > 1
+        warning('Plusieurs valeurs GVI pour %s - %s, moyenne prise', participant, cond);
+        gvi_value = mean(gvi_value, 'omitnan');
+    end
+    
+    gvi_value = gvi_value(1);
 end

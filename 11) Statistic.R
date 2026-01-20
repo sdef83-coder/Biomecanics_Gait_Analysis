@@ -1,5 +1,183 @@
+## Script en 3 parties 
+# I. Stat.descriptives
+# II. Comparaison 
+# III. LMM & Post-hocs
+
 ## ============================================================
-## LMM Surface (répété) x AgeGroup (inter) + post-hocs emmeans
+## I. STATISTIQUES DESCRIPTIVES
+## ============================================================
+## =========================================================
+## =========================================================
+## Table 1 (descriptifs) à partir de participants_metadata.csv
+## - Quantitatives : moyenne ± ET
+## - Qualitatives  : n (%)
+## - Colonnes : Global (Sexe uniquement) + par AgeGroup
+## =========================================================
+
+setwd("C:/Users/silve/Desktop/DOCTORAT/UNIV MONTREAL/TRAVAUX-THESE/Surfaces_Irregulieres/Datas/Script/gaitAnalysisGUI/result")
+
+library(readr)
+library(dplyr)
+library(stringr)
+library(gtsummary)
+library(gt)
+library(janitor)
+
+chemin <- "C:/Users/silve/Desktop/DOCTORAT/UNIV MONTREAL/TRAVAUX-THESE/Surfaces_Irregulieres/Datas/Script/gaitAnalysisGUI/result/Statistical_Analysis_LMM"
+
+# 0) Import + nettoyage des noms (snake_case)
+df <- read.csv(
+  file.path(chemin, "participants_metadata.csv"),
+  sep = ";",
+  check.names = FALSE,
+  stringsAsFactors = FALSE
+) %>%
+  janitor::clean_names()
+
+# 1) Typage + facteurs (Correction "Jeunes Enfants" incluse)
+df <- df %>%
+  mutate(
+    participant = as.character(participant),
+    age_group = factor(
+      age_group,
+      levels = c("Jeunes Enfants","Enfants","Adolescents","Adultes"),
+      labels = c("Young children", "Children", "Adolescents", "Adults")
+    ),
+    sex         = factor(sex, levels = c("F","M")),
+    age_months  = as.numeric(age_months),
+    height_cm   = as.numeric(height_cm),
+    weight_kg   = as.numeric(weight_kg),
+    l0_m        = as.numeric(l0_m),
+    imc         = as.numeric(imc)
+  )
+
+# 2) Construction de la Table 1 en deux parties
+
+# A. Partie Sexe (Qualitative) - SANS add_p()
+tab_sex <- df %>%
+  select(age_group, sex) %>%
+  tbl_summary(
+    by = age_group,
+    label = list(sex ~ "Sex"),
+    statistic = list(all_categorical() ~ "{n} ({p}%)"),
+    digits = list(all_categorical() ~ c(0, 1)),
+    missing = "no"
+  ) %>%
+  add_overall(last = FALSE, col_label = "**Global**")
+
+# B. Partie Anthropométrique (Quantitative) + p-value
+tab_others <- df %>%
+  select(age_group, age_months, height_cm, weight_kg, l0_m, imc) %>%
+  tbl_summary(
+    by = age_group,
+    label = list(
+      age_months ~ "Age (months)",
+      height_cm  ~ "Height (cm)",
+      weight_kg  ~ "Weight (kg)",
+      l0_m       ~ "L0 (m)",
+      imc        ~ "BMI (kg/m²)"
+    ),
+    statistic = list(all_continuous() ~ "{mean} ± {sd}"),
+    digits = list(all_continuous() ~ 2),
+    missing = "no"
+  ) %>%
+  add_p(test = all_continuous() ~ "kruskal.test")
+
+# C. Fusion et Nettoyage des indices
+tab1_final <- tbl_stack(list(tab_sex, tab_others)) %>%
+  bold_labels() %>%
+  modify_header(
+    label ~ "**Variable**",
+    p.value ~ "**p-value**"
+  ) %>%
+  modify_spanning_header(all_stat_cols() ~ "**Age groups**") %>%
+  modify_footnote(all_stat_cols() ~ "n (%), Mean ± SD")
+
+# Affichage du résultat
+tab1_final
+
+# 3) Calculs de vérification
+age_counts <- df %>% count(age_group)
+sex_by_age <- df %>% count(age_group, sex)
+
+print(age_counts)
+print(sex_by_age)
+
+# 4) Export HTML
+as_gt(tab1_final) %>% gt::gtsave("Table1_participants.html")
+
+# 5) Export pdf
+# Convertir le tableau gtsummary en objet gt
+gt_table <- as_gt(tab1_final)
+# Sauvegarde en PDF (Qualité vectorielle parfaite)
+gt::gtsave(gt_table, "Table1_participants.pdf")
+
+print("Parti I effectuée avec succés ! On a la Table 1")
+
+
+## ============================================================
+## II. MOYENNE +- SD DES VARIABLES SPT
+## ============================================================
+
+setwd('C:/Users/silve/Desktop/DOCTORAT/UNIV MONTREAL/TRAVAUX-THESE/Surfaces_Irregulieres/Datas/Script/gaitAnalysisGUI/result')
+
+# Import useful Libraries to the script
+library(readr)
+library(dplyr)
+library(openxlsx)
+
+# Define .csv path
+chemin <- "C:/Users/silve/Desktop/DOCTORAT/UNIV MONTREAL/TRAVAUX-THESE/Surfaces_Irregulieres/Datas/Script/gaitAnalysisGUI/result" # Aller chercher le document dans un dossier
+df <- read.csv(file.path(chemin,"ACP_Clustering_DATA.csv"), sep = ";")
+
+# Overview of the data set
+glimpse(df)
+
+# Change characters variable to factor
+df <- df %>%
+  mutate(
+    AgeGroup = factor(AgeGroup,
+                      levels = c("JeunesEnfants", "Enfants", "Adolescents", "Adultes")),
+    Surface = factor(Surface,
+                     levels = c("Plat", "Medium", "High"))
+  )
+
+# Descriptive Statistics 
+desc_stats <- df %>%
+  group_by(AgeGroup, Surface) %>%
+  summarise(
+    n = n(),
+    across(
+      where(is.numeric),
+      list(
+        mean   = ~mean(.x, na.rm = TRUE),
+        sd     = ~sd(.x, na.rm = TRUE),
+        median = ~median(.x, na.rm = TRUE),
+        IQR    = ~IQR(.x, na.rm = TRUE)
+      ),
+      .names = "{.col}_{.fn}"
+    ),
+    .groups = "drop"
+  )
+
+desc_mean_sd <- df %>%
+  group_by(AgeGroup, Surface) %>%
+  summarise(
+    across(
+      where(is.numeric),
+      ~sprintf("%.2f ± %.2f",
+               mean(.x, na.rm = TRUE),
+               sd(.x, na.rm = TRUE))
+    ),
+    .groups = "drop"
+  )
+
+write.xlsx(desc_stats,
+           file = "Descriptives_AgeGroup_Surface.xlsx",
+           overwrite = TRUE)
+
+## ============================================================
+## III. LMM Surface (répété) x AgeGroup (inter) + post-hocs emmeans
 ## ============================================================
 
 ## 0) Packages
