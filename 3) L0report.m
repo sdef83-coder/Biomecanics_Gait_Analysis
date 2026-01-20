@@ -76,18 +76,20 @@ end
 % l0_map('CTL_63') = 0.47;
 % l0_map('CTL_65') = 0.472;
 % l0_map('CTL_66') = 0.89 ;
+% l0_map('CTL_67') = 0.50;
 % l0_map('CTL_68') = 0.83 ;
-% l0_map('CTL_70') = 0.6275 ;
+% l0_map('CTL_69') = 0.8145;
+% l0_map('CTL_70') = 0.6275;
+% l0_map('CTL_71') = 0.8825;
+% l0_map('CTL_73') = 0.8775;
 % l0_map('CTL_75') = 0.568 ;
+% l0_map('CTL_76') = 1.01;
+% l0_map('CTL_77') = 0.45;
 
 % === NOUVEAUX PARTICIPANTS (à ajouter) ===
 
-l0_map('CTL_57') = 0.5755 ; % Nouveau participant - décommentez si besoin de rajouter un participant
-l0_map('CTL_58') = 0.608 ;
-l0_map('CTL_66') = 0.89 ;
-l0_map('CTL_68') = 0.83 ;
-l0_map('CTL_70') = 0.6275 ;
-l0_map('CTL_75') = 0.568 ;
+l0_map('CTL_77') = 0.45; % Nouveau participant - décommentez si besoin de rajouter un participant
+
 
 % l0_map('CTL_21') = 0.90 ; Si besoin
 % l0_map('CTL_43') = 0.92 ;

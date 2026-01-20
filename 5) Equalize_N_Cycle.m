@@ -18,7 +18,7 @@ participants = keys(l0_map);
 
 % === OPTION : traiter 1, plusieurs ou tous les participants ===
 RUN_ONLY_SOME = true;   % false = traiter tous les participants
-PARTICIPANTS_TO_RUN = {'CTL_68'};  % <--- liste de 1 ou plusieurs participant(s)
+PARTICIPANTS_TO_RUN = {'CTL_53', 'CTL_40', 'CTL_37', 'CTL_23', 'CTL_15', 'CTL_14', 'CTL_69', 'CTL_71', 'CTL_73', 'CTL_76', 'CTL_51', 'CTL_08', 'CTL_18', 'CTL_38', 'CTL_39', 'CTL_05'};  % <--- liste de 1 ou plusieurs participant(s)
 
 if RUN_ONLY_SOME
     % Vérifier que tous les IDs existent

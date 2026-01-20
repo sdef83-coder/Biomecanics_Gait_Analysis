@@ -8,8 +8,8 @@ addpath(genpath('C:\Users\silve\OneDrive - Universite de Montreal\Silvere De Fre
 addpath(genpath('C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\functions'));
 
 %% === PARAMÈTRES ===
-sujet_id = 'CTL_15';
-base_dir = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\Data\jeunes_enfants';
+sujet_id = 'CTL_46';
+base_dir = 'C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\Data\enfants';
 mat_file = sprintf('C:\\Users\\silve\\Desktop\\DOCTORAT\\UNIV MONTREAL\\TRAVAUX-THESE\\Surfaces_Irregulieres\\Datas\\Script\\gaitAnalysisGUI\\result\\MoS\\MoS_results_%s.mat', sujet_id);
 
 % Les 3 surfaces étudiées

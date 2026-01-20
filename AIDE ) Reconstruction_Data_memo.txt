@@ -1,0 +1,9 @@
+1. Labellisation du participant NEXUS avec marqueur manquant (membre sup., si c'est membre inf. c'est plus difficile d'avoir des données correctement interprétables).
+
+2. Ensuite importer sur ordi de travail les .c3d labellisés PUIS run le script pour chacun des essais à modifier (attention chemins d'accès)
+
+3. Une fois les "NEW" sortis, remettre sur le disque dur les nouveaux essais AVEC les anciens (pour que NEXUS trouve dans le même dossier les nouveaux/anciens, car garde les mêmes modèles de sujets pour y appliquer la correction aux nouveaux)
+
+4. Mettre les events
+
+5. Extraire les essais .C3D et les renommer dans le dossier "data"

@@ -1,11 +1,12 @@
 clear all
 clc
 close all
-cd P:\mfiles\Reconstruction_marqueurs
+cd ('C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\Data')
+addpath(genpath('C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\functions\btk'));  
 
 %% modif ou ajout de pistes cinématiques de marqueurs
 
-acq=btkReadAcquisition('CTL_67_Plat_02.c3d'); % ouverture du fichier C3D
+acq=btkReadAcquisition('CTL_67_High_05.c3d'); % ouverture du fichier C3D
 
 markers=btkGetMarkers(acq); % extraction de la cinematique des marqueurs
 
@@ -34,9 +35,9 @@ valeurs(:,3)=values3(:,3); % pour troisième colonne le vecteur selon z de NOM_M
 
 %% ENREGISTREMENT DES DONNEES
 
-btkWriteAcquisition(acq,'CTL_67_Plat_02_NEW.c3d'); % création du nouveau fichier C3D. 
+btkWriteAcquisition(acq,'CTL_67_High_05_NEW.c3d'); % création du nouveau fichier C3D. 
 
 %% verfication 
-acq1=btkReadAcquisition('CTL_67_Plat_02_NEW.c3d'); % ouverture du fichier C3D
+acq1=btkReadAcquisition('CTL_67_High_05_NEW.c3d'); % ouverture du fichier C3D
 markers1=btkGetMarkers(acq1); % extraction de la cinematique des marqueurs
 
