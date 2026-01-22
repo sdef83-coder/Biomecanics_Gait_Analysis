@@ -49,10 +49,7 @@ domains.Variability = {
 };
 
 domains.Smoothness = {
-    'COM_SPARC_Magnitude',  'COM SPARC Magnitude (ua)',  'Mean';
-    'COM_LDLJ_Magnitude',   'COM LDLJ Magnitude (ua)',   'Mean';
-    'STERN_SPARC_Magnitude','STERN SPARC Magnitude (ua)','Mean';
-    'STERN_LDLJ_Magnitude', 'STERN LDLJ Magnitude (ua)', 'Mean'
+   'STERN_SPARC_Magnitude','STERN SPARC Magnitude (ua)','Mean'
 };
 
 % === Mapping "nom technique" → "nom lisible" (ce que connaît la table) ===

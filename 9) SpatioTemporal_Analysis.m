@@ -90,7 +90,7 @@ for g = 1:length(groupNames)
         % recapRows = repmat(struct(), 1, length(participants));
         % rowIdx = 1;
         rowIdx = 1;
-        recapRows = [];
+        recapRows = {};
 
         for iP = 1:length(participants)
             participant = participants{iP};
@@ -196,24 +196,22 @@ end
                 for f = 1:length(statsFields)
                     fname = statsFields{f};
 
-                    if endsWith(fname, '_Mean_Mean')
-                        shortName = extractBefore(fname, '_Mean_Mean');
+                    % Extraction robuste (insensible à la casse)
+                    if contains(fname, '_Mean_Mean', 'IgnoreCase', true)
+                        % On enlève le suffixe pour garder la racine (ex: pctToeOff)
+                        shortName = regexprep(fname, '_Mean_Mean$', '', 'ignorecase');
                         row.(['Mean_' shortName]) = stats.(fname);
-                    elseif endsWith(fname, '_CV_Mean')
-                        shortName = extractBefore(fname, '_CV_Mean');
+                    elseif contains(fname, '_CV_Mean', 'IgnoreCase', true)
+                        shortName = regexprep(fname, '_CV_Mean$', '', 'ignorecase');
                         row.(['CV_' shortName]) = stats.(fname);
-                    elseif endsWith(fname, '_SI')
-                        shortName = extractBefore(fname, '_SI');
+                    elseif contains(fname, '_SI', 'IgnoreCase', true)
+                        shortName = regexprep(fname, '_SI$', '', 'ignorecase');
                         row.(['SI_' shortName]) = stats.(fname);
                     end
                 end
 
-                   % Initialisation correcte du tableau struct si premier passage
-        if rowIdx == 1
-            recapRows = repmat(row, 1, length(participants));
-        end
-
-        recapRows(rowIdx) = row;
+       % On ajoute simplement la ligne à la suite des autres
+        recapRows{end+1} = row;
         rowIdx = rowIdx + 1;
 
 if ~isfield(SpatioTemporalDATA, 'ALL') || ~isfield(SpatioTemporalDATA.ALL, cond)
@@ -228,7 +226,7 @@ end
         end
 
         % Convertir en table une fois à la fin de la condition
-        recapData = struct2table(recapRows(1:rowIdx-1));
+recapData = struct2table(cell2mat(recapRows));
         SpatioTemporalDATA.(groupName).(cond) = recapData;
         fprintf('  -> Données du groupe %s pour la condition %s traitées.\n', groupName, cond);
     end

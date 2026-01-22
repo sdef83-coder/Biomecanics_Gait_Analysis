@@ -217,6 +217,7 @@ df <- df %>%
 ## 4) Liste des variables à tester (noms EXACTS des colonnes du CSV)
 variables_to_test <- c(
   "Mean_Single support time (%)",
+  "Mean_ToeOff (%)",
   "Mean_Double support time (%)",
   "Mean_BaseOfSupport (cm)",
   "Mean_StepWidth (cm)",
@@ -224,6 +225,9 @@ variables_to_test <- c(
   "Mean_Stride length (m)",
   "Mean_Stride time (s)",
   "Mean_WalkRatio",
+  "Mean_StepTime_s",
+  "Mean_StanceTime_s",
+  "Mean_SwingTime_s",
   "Mean_Norm WR (ua)",
   "Mean_Cadence (step.min^{-1})",
   "Mean_Norm Step length (ua)",

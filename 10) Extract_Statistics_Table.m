@@ -16,7 +16,7 @@ load('SpatioTemporalDATA.mat');   % doit contenir SpatioTemporalDATA
 stats_path = fullfile(pwd, 'Statistical_Analysis_LMM');
 if ~exist(stats_path, 'dir'), mkdir(stats_path); end
 
-%% =============== Configuration ===============
+%% =============== Configuration des variables ===============
 surfaces = {'Plat', 'Medium', 'High'};
 groups   = {'JeunesEnfants', 'Enfants', 'Adolescents', 'Adultes'};
 
@@ -187,4 +187,64 @@ end
 writetable(DATA_all_csv, fullfile(prep_path, 'DATA_all_prepared.csv'));
 fprintf('✓ DATA_all_prepared.csv sauvegardé\n');
 
-%%
+%% AJOUT DES VARIABLES INCLUS DANS CALCUL DU GVI ============================================================
+%  Ajout StepTime (s), StanceTime (s), SwingTime (s) dans un CSV
+%  Méthode = identique à ton script GVI :
+%   - StepTime(s)  = 60 / Cadence(steps/min)
+%   - StanceTime(s)= StrideTime(s) * pctToeOff/100
+%   - SwingTime(s) = StrideTime(s) - StanceTime(s)
+%
+%  IMPORTANT : dans ton CSV, pctToeOff est stocké sous
+%  "Mean_pctToeOff" (en %). Le code l’utilise tel quel.
+% ============================================================
+
+clc; clear; close all;
+
+folder = "C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Surfaces_Irregulieres\Datas\Script\gaitAnalysisGUI\result\Statistical_Analysis_LMM\Prepared_Data";
+inFile  = fullfile(folder, "DATA_all_prepared.csv");
+outFile = fullfile(folder, "ACP_Clustering_DATA.csv");
+
+% --- Lecture (CSV séparé par ; ) ---
+T = readtable(inFile, ...
+    "Delimiter",";", ...
+    "TextType","string", ...
+    "PreserveVariableNames",true);
+
+% --- Récupérer les colonnes nécessaires ---
+cadence   = T.("Mean_Cadence (step.min^{-1})");   % steps/min
+strideT_s = T.("Mean_Stride time (s)");           % s
+pctTO     = T.("Mean_ToeOff (%)");           % % (0-100)
+
+% --- Calculs ---
+Mean_StepTime_s  = 60 ./ cadence;
+Mean_StanceTime_s = strideT_s .* (pctTO ./ 100);
+Mean_SwingTime_s  = strideT_s - Mean_StanceTime_s;
+
+% --- Nettoyage robuste (valeurs non finies / incohérentes) ---
+badCad = ~isfinite(cadence) | cadence <= 0;
+Mean_StepTime_s(badCad) = NaN;
+
+badStride = ~isfinite(strideT_s) | strideT_s <= 0;
+badPct = ~isfinite(pctTO) | pctTO < 0 | pctTO > 100;
+
+Mean_StanceTime_s(badStride | badPct) = NaN;
+Mean_SwingTime_s(badStride | badPct)  = NaN;
+
+% Si swing/stance deviennent négatifs (incohérence), on met NaN
+Mean_StanceTime_s(Mean_StanceTime_s < 0) = NaN;
+Mean_SwingTime_s(Mean_SwingTime_s < 0)   = NaN;
+
+% --- Ajouter les colonnes au tableau ---
+T.Mean_StepTime_s   = Mean_StepTime_s;
+T.Mean_StanceTime_s = Mean_StanceTime_s;
+T.Mean_SwingTime_s  = Mean_SwingTime_s;
+
+% --- Export (en gardant ; comme séparateur) ---
+writetable(T, outFile, "Delimiter",";");
+
+fprintf("✅ Colonnes ajoutées et exportées :\n%s\n", outFile);
+
+%% Optionnel : aperçu rapide pour voir si paramètres en lien avec GVI présents
+disp(T(1:10, ["Participant","Surface","AgeGroup", ...
+              "Mean_Cadence (step.min^{-1})","Mean_Stride time (s)","Mean_pctToeOff", ...
+              "StepTime_s","StanceTime_s","SwingTime_s"]));
