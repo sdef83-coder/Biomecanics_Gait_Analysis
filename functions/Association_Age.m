@@ -3,7 +3,7 @@ function age = Association_Age(participant)
 % faire cela)
 
 switch participant
-    case 'CTL_01', age = 110;
+    case 'CTL_01', age = 117;
     case 'CTL_02', age = 87;
     case 'CTL_03', age = 295;
     case 'CTL_04', age = 341;

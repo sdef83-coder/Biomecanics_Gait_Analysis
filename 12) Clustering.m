@@ -20,18 +20,20 @@ ts = string(datetime('now','Format','yyyyMMdd_HHmm')); % horodatage
 domains = struct();
 
 domains.Pace = {
-    'vitFoulee',      'Gait speed (m.s^{-1})',     'Mean';
-    'NormCadence',    'Norm Cadence (ua)',         'Mean';
-    'NormStepLength', 'Norm Step length (ua)',     'Mean';
-    'NormWalkRatio',  'Norm WR (ua)',              'Mean'
+    'Norm Gait Speed',      'Norm Gait Speed (m.s^{-1})',     'Mean';
+    'NormStepLength',    'Norm Step length (ua)',         'Mean';
+    'NormWalkRatio', 'Norm WR (ua)',     'Mean'
 };
 
 domains.Rhythm = {
-    'DoubleSupport',  'Double support time (%)',   'Mean'
+    'DoubleSupport',  'Double support time (%)',   'Mean';
+    'NormCadence',    'Norm Cadence (ua)',         'Mean';
+    'ToeOff (%)',    'ToeOff (%)',         'Mean';
+    'COM_SPARC_Magnitude','COM SPARC Magnitude (ua)', 'Mean'
 };
 
-domains.Stability = {
-    'LargeurPas',     'Stride width (cm)',         'Mean';
+domains.PosturalControl = {
+    'Norm StepWidth (ua)',     'Norm StepWidth (ua)',         'Mean';
     'MoS_ML_HS_pL0',  'MoS ML HS (%L0)',           'Mean';
     'MoS_AP_HS_pL0',  'MoS AP HS (%L0)',           'Mean'
 };
@@ -39,36 +41,34 @@ domains.Stability = {
 domains.Asymmetry = {
     'distFoulee',     'Stride length (m)',         'SI';
     'DoubleSupport',  'Double support time (%)',   'SI';
-    'LargeurPas',     'Stride width (cm)',         'SI';
+    'LargeurPas',     'Stride width (cm)',         'SI'
 };
 
 domains.Variability = {
-    'distFoulee',     'Stride length (m)',         'CV';
-    'LargeurPas',     'Stride width (cm)',         'CV';
+    'Norm StepWidth (ua)',     'Norm StepWidth (ua)',         'CV';
+    'GVI (ua)',       'GVI (ua)',                  'Mean';
     'vitFoulee',      'Gait speed (m.s^{-1})',     'CV'  
 };
 
-domains.Smoothness = {
-   'STERN_SPARC_Magnitude','STERN SPARC Magnitude (ua)','Mean'
-};
 
 % === Mapping "nom technique" → "nom lisible" (ce que connaît la table) ===
 nameMap = containers.Map;
 nameMap('vitFoulee')               = 'Gait speed (m.s^{-1})';
+nameMap('Norm Gait Speed')         = 'Norm Gait Speed (m.s^{-1})';
 nameMap('distFoulee')              = 'Stride length (m)';
 nameMap('NormStepLength')          = 'Norm Step length (ua)';
 nameMap('tempsFoulee')             = 'Stride time (s)';
 nameMap('vitCadencePasParMinute')  = 'Cadence (step.min^{-1})';
 nameMap('NormCadence')             = 'Norm Cadence (ua)';
 nameMap('NormWalkRatio')           = 'Norm WR (ua)';
-nameMap('LargeurPas')              = 'Stride width (cm)';
+nameMap('LargeurPas')              = 'StepWidth (cm)';
+nameMap('Norm StepWidth (ua)')     = 'Norm StepWidth (ua)';
 nameMap('DoubleSupport')           = 'Double support time (%)';
 nameMap('MoS_AP_HS_pL0')           = 'MoS AP HS (%L0)';
 nameMap('MoS_ML_HS_pL0')           = 'MoS ML HS (%L0)';
 nameMap('COM_SPARC_Magnitude')     = 'COM SPARC Magnitude (ua)';
-nameMap('COM_LDLJ_Magnitude')      = 'COM LDLJ Magnitude (ua)';
-nameMap('STERN_SPARC_Magnitude')   = 'STERN SPARC Magnitude (ua)';
-nameMap('STERN_LDLJ_Magnitude')    = 'STERN LDLJ Magnitude (ua)';
+nameMap('GVI (ua)')                = 'GVI (ua)';
+nameMap('ToeOff (%)')              = 'ToeOff (%)';
 
 % === Construction automatique de allVars depuis les domaines ===
 allVars = {};
@@ -80,14 +80,15 @@ for d = 1:numel(domainNames)
         varTech = dVars{v,1};  % ex: 'vitFoulee'
         varType = dVars{v,3};  % 'Mean', 'SI', ou 'CV'
         
-        % Construire le nom complet : "Mean_Gait speed (m.s^{-1})"
+        % --- LIGNES CORRIGÉES (DÉCOMMENTÉES) ---
         baseName = nameMap(varTech);
         fullVarName = [varType '_' baseName];
         
-        % Éviter les doublons
+        % Éviter les doublons et remplir la liste
         if ~ismember(fullVarName, allVars)
             allVars{end+1} = fullVarName; %#ok<SAGROW>
         end
+        % ---------------------------------------
     end
 end
 
@@ -150,14 +151,14 @@ cumVar = cumsum(explained);
 
 yyaxis left
 bar(explained, 'FaceColor', [0.2 0.4 0.8]); hold on;
-ylabel('Variance expliquée (%)');
+ylabel('Explained variance (%)');
 
 yyaxis right
 plot(cumVar, '-o', 'Color', [0.8 0.2 0.2], 'LineWidth', 1.5);
-ylabel('Variance cumulée (%)');
+ylabel('Cumulative explained variance (%)');
 
-xlabel('Composantes principales (PC)');
-title('Variance expliquée et cumulée — ACP globale');
+xlabel('Principal components (PC)');
+title('Explained and cumulative explained variance - Global PCA');
 grid on;
 
 % Ligne du seuil 70 %
@@ -171,7 +172,7 @@ th = linspace(0, 2*pi, 100);
 plot(cos(th), sin(th), 'k--'); % cercle unité
 xlabel(sprintf('PC1 (%.1f%%)', explained(1)));
 ylabel(sprintf('PC2 (%.1f%%)', explained(2)));
-title('Cercle de corrélation (variables originales vs PC1-PC2)');
+title('Correlation Plot PC1-PC2)');
 grid on;
 
 % Corrélations variables vs composantes
@@ -203,9 +204,9 @@ loadings = corr(dataNorm, score(:, 1:nPC_final));
 fig_heatmap_loadings = figure('Color','w', 'Position', [100 100 1200 800]);
 h_load = heatmap(arrayfun(@(i) sprintf('PC%d (%.1f%%)', i, explained(i)), 1:nPC_final, 'UniformOutput', false), ...
                  allVars_disp, loadings, ...
-                 'Title', sprintf('Loadings des variables sur les %d PCs sélectionnées (≥70%% variance)', nPC_final), ...
-                 'XLabel', 'Composantes principales', ...
-                 'YLabel', 'Variables spatio-temporelles', ...
+                 'Title', sprintf('Variable Loadings on the selected %d principal components (≥70%% variance)', nPC_final), ...
+                 'XLabel', 'Principal components', ...
+                 'YLabel', 'Spatiotemporal variables', ...
                  'Colormap', redblue(256), ...
                  'ColorLimits', [-1, 1]);
 h_load.FontSize = 9;
@@ -248,7 +249,7 @@ for i = 1:nPC_pairplot
     end
 end
 
-sgtitle(sprintf('Pairplot des %d premières PCs avec gradient d''âge', nPC_pairplot), ...
+sgtitle(sprintf('Pairwise plots of the first %d principal components with an age gradient', nPC_pairplot), ...
         'FontSize', 14, 'FontWeight', 'bold');
 
 exportgraphics(fig_pairplot, fullfile(outdir, "02b_Pairplot_PCs_AgeGradient_"+ts+".png"), 'Resolution',300);
@@ -287,9 +288,9 @@ for kk = 1:numel(kRange)
 end
 fig_elbow = figure('Color','w');
 plot(kRange, WCSS_vals, '-o', 'LineWidth',1.5);
-xlabel('Nombre de clusters (k)');
-ylabel('Somme des distances intra-clusters (WCSS)');
-title('Méthode du coude — Données globales');
+xlabel('Number of clusters (k)');
+ylabel('Within-cluster sum of squares (WCSS)');
+title('Elbow method - Global data');
 grid on;
 exportgraphics(fig_elbow, fullfile(outdir, "03a_ElbowPlot_GLOBAL_"+ts+".png"), 'Resolution',300);
 
@@ -302,7 +303,7 @@ nexttile; plot(kRange,db_vals ,'-o'); grid on; title('Davies–Bouldin ↓'); xl
 nexttile; plot(kRange,gap_vals,'-o'); grid on; title('Gap ↑ (règle 1-SE)'); xlabel('k'); hold on; yline(gap_th,'k--','1-SE');
 nexttile; plot(kRange,ari_mean,'-o'); grid on; title('Stabilité (ARI) ↑'); xlabel('k');
 nexttile; plot(kRange,score_global,'-o'); hold on; plot(k_global, score_global(best_idx),'rp','MarkerFaceColor','r');
-grid on; title(sprintf('Score global ↑ (k*=%d)',k_global)); xlabel('k');
+grid on; title(sprintf('Global score ↑ (k*=%d)',k_global)); xlabel('k');
 exportgraphics(fig_kcrit, fullfile(outdir, "03b_Kselection_multiCriteria_GLOBAL_"+ts+".png"), 'Resolution',300);
 
 % === ÉVALUATION COMPARATIVE (k=2→10) — TABLEAU SYNTHÉTIQUE ===
@@ -355,6 +356,15 @@ ClusterTrace.PC2         = Xpcs_all_viz(:,2);
 % Tri par cluster
 ClusterTrace = sortrows(ClusterTrace, "Cluster");
 
+% === EXPORT COMPLET POUR R (GLOBAL) ===
+% On crée une table qui combine Meta, le Cluster assigné, et les données brutes (dataMat)
+FinalTable_Global = [meta, table(idxCluster_global, 'VariableNames', {'ClusterID'}), array2table(dataMat, 'VariableNames', allVars)];
+
+% Export CSV
+out_R_global = fullfile(outdir, "DATA_FOR_R_GLOBAL_" + ts + ".csv");
+writetable(FinalTable_Global, out_R_global);
+fprintf('✅ Export pour R (Global) : %s\n', out_R_global);
+
 % Export CSV
 out_trace = fullfile(outdir, "06_ClusterTraceability_GLOBAL_"+ts+".csv");
 writetable(ClusterTrace, out_trace);
@@ -387,7 +397,7 @@ cb.FontSize = 11;
 
 xlabel(sprintf('PC1 (%.1f%%)', explained(1)), 'FontSize', 12); 
 ylabel(sprintf('PC2 (%.1f%%)', explained(2)), 'FontSize', 12);
-title(sprintf('PC1–PC2 avec gradient d''âge et formes par surface\nClustering sur %d PC(s), k=%d', ...
+title(sprintf('PC1–PC2 projection with age gradient and surface-specific markers\nClustering based on %d principal components, k=%d', ...
               nPC_final, k_global), 'FontSize', 13);
 grid on;
 
@@ -445,8 +455,8 @@ rowLabels = arrayfun(@(i) ...
     1:k_global, 'UniformOutput', false);
 
 h = heatmap(allVars_disp, rowLabels, heatmap_data_global, ...
-    'Title', sprintf('Profils moyens z-score — Global (k=%d, nPC=%d)', k_global, nPC_final), ...
-    'XLabel','Variables spatio-temporelles','YLabel','Clusters (taille, âge)', ...
+    'Title', sprintf('Mean z-score profiles - Global (k=%d, nPC=%d)', k_global, nPC_final), ...
+    'XLabel','Spatiotemporal variables','YLabel','Clusters (taille, âge)', ...
     'Colormap', blueyellow(256), 'ColorLimits', [-clim, clim]);
 h.FontSize = 10; h.CellLabelFormat = '%.2f'; h.GridVisible = 'on';
 exportgraphics(fig_heat, fullfile(outdir, "05_Heatmap_Profils_GLOBAL_k"+k_global+"_"+ts+".png"), 'Resolution',300);
@@ -520,6 +530,8 @@ disp(StatsClusters)
 
 % Export CSV
 writetable(StatsClusters, fullfile(outdir, "ClusterComparison_STATS_BONFERRONI_"+ts+".csv"));
+
+fprintf('\n💡 Aller voir le fichier R pour stats inter-cluster');
 
 %% ========== (B) CLUSTERING PAR K-MEANS ANALYSES PAR CONDITION (Plat / Medium / High) ==========
 independentPCA = false;  % false = ACP commune (comparabilité), true = ACP par condition
@@ -596,9 +608,9 @@ for iC = 1:numel(conds)
     end
     fig_elbow_c = figure('Color','w');
     plot(kRange_c, WCSS_vals_c, '-o', 'LineWidth',1.5);
-    xlabel('Nombre de clusters (k)');
-    ylabel('Somme des distances intra-clusters (WCSS)');
-    title(sprintf('Méthode du coude — %s', cond));
+    xlabel('Number of clusters (k)');
+    ylabel('Within-cluster sum of squares (WCSS)');
+    title(sprintf('Elbow method - %s', cond));
     grid on;
     exportgraphics(fig_elbow_c, fullfile(outdir, "B01_ElbowPlot_"+cond+"_"+ts+".png"), 'Resolution',300);
 
@@ -618,12 +630,23 @@ for iC = 1:numel(conds)
     [idxC, CcC_npc] = kmeans(pcs_c, k_c, 'Replicates',40,'MaxIter',400,'Display','off');
     CcC_pc12 = CcC_npc(:,1:2);
 
+    % === EXPORT COMPLET POUR R (CONDITION : %s) ===
+    % On récupère les données brutes de la condition actuelle
+    dataRAW_c = dataMat(idxCond, :); 
+    
+    FinalTable_Cond = [meta_c, table(idxC, 'VariableNames', {'ClusterID'}), array2table(dataRAW_c, 'VariableNames', allVars)];
+    
+    % Export CSV
+    out_R_cond = fullfile(outdir, "DATA_FOR_R_" + cond + "_" + ts + ".csv");
+    writetable(FinalTable_Cond, out_R_cond);
+    fprintf('✅ Export pour R (%s) : %s\n', cond, out_R_cond);
+
     % Scatter PC1–PC2 + gradient âge + contours
     figc = figure('Color','w'); hold on;
     scatter(pcs_c_viz(:,1), pcs_c_viz(:,2), 42, meta_c.AgeMonths/12, 'filled');
-    colormap(parula); cb = colorbar; cb.Label.String = 'Âge (années)';
+    colormap(parula); cb = colorbar; cb.Label.String = 'age (years)';
     xlabel(sprintf('PC1 (%.1f%%)', expl1)); ylabel(sprintf('PC2 (%.1f%%)', expl2));
-    title(sprintf('%s — PC1–PC2 (viz). Clustering sur %d PC(s), k=%d', cond, size(pcs_c,2), k_c)); grid on;
+    title(sprintf('%s - PC1–PC2 - Clustering based on %d principal components, k=%d', cond, size(pcs_c,2), k_c)); grid on;
 
     colsC = lines(k_c);
     for ic = 1:k_c
@@ -665,8 +688,8 @@ for iC = 1:numel(conds)
         sprintf('C%d (n=%d, %.1f ans)', ic, sum(idxC==ic), AgeStats_c.AgeMonths_mean(ic)/12), ...
         1:k_c, 'UniformOutput', false);
     h_c = heatmap(allVars_disp_c, rowLabels_c, heatmap_data_c, ...
-        'Title', sprintf('Profils moyens z-score — %s (k=%d, nPC=%d)', cond, k_c, size(pcs_c,2)), ...
-        'XLabel','Variables spatio-temporelles','YLabel','Clusters (taille, âge)', ...
+        'Title', sprintf('Mean z-score profiles — %s (k=%d, nPC=%d)', cond, k_c, size(pcs_c,2)), ...
+        'XLabel','Spatiotemporal variables','YLabel','Clusters (taille, âge)', ...
         'Colormap', blueyellow(256), 'ColorLimits', [-clim_c, clim_c]);
     h_c.FontSize = 10; h_c.CellLabelFormat = '%.2f'; h_c.GridVisible = 'on';
     exportgraphics(fig_heat_c, fullfile(outdir, "B04_Heatmap_Profils_"+cond+"_k"+k_c+"_"+ts+".png"), 'Resolution',300);
@@ -748,11 +771,11 @@ disp("✅ Analyses GLOBAL + PAR CONDITION terminées. Exports : " + outdir);
 function grp = age_group_from_months(m)
 if isnan(m)
     grp = "NA";
-elseif m <= 72
+elseif m < 72
     grp = "JeunesEnfants";
-elseif m <= 144
+elseif m < 144
     grp = "Enfants";
-elseif m <= 216
+elseif m < 216
     grp = "Adolescents";
 else
     grp = "Adultes";

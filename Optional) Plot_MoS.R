@@ -58,7 +58,7 @@ create_mos_plot_with_points <- function(df, variables, title_label, unit_label) 
     
     facet_wrap(~ Variable, scales = "free_y", ncol = 2) +
     # Note : Vérifiez que vos couleurs correspondent aux labels (Level, Medium, Uneven)
-    scale_fill_manual(values = c("Even" = "blue", "Medium" = "#ABD9E9", "High" = "red")) + 
+    scale_fill_manual(values = c("Even" = "blue", "Medium" = "green", "High" = "red")) + 
     labs(
       title = paste("Margin Of Stability:", title_label),
       y = paste("Value", unit_label), # On enlève "Mean ± SD" car c'est une distribution
