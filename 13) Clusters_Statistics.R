@@ -10,12 +10,16 @@ library(rstatix)
 library(ggalluvial)
 library(gridExtra)
 library(grid)
+library(gtable)
+library(fmsb)
+
 
 
 
 # 2. Importation
-df_clust <- read.csv("DATA_FOR_R_GLOBAL_20260122_1513.csv", sep = ",", check.names = FALSE)
+df_clust <- read.csv("DATA_FOR_R_GLOBAL_20260123_1409.csv", sep = ";", check.names = FALSE)
 df_meta <- read.csv(file.choose(), sep = ";", check.names = FALSE)
+# Aller chercher le fichier "participant.metadonnees" dans le dossier stats LMM - stats descriptives
 
 View(df_meta)
 View(df_clust)
@@ -23,87 +27,198 @@ View(df_clust)
 
 
 # 3. Jointure (Lien entre l'ID et le Sexe/Age)
-# On reste en format simple (texte/numérique) pour éviter les erreurs de type
-df <- left_join(df_clust, df_meta, by = "Participant")
+# On ne garde que Participant, AgeMonths et Sex du fichier meta pour éviter les doublons
+df_meta_clean <- df_meta %>%
+  select(Participant, AgeMonths, Sex) 
+
+df <- left_join(df_clust, df_meta_clean, by = "Participant")
+
+
+# 3.1 Préparation des variables
+# On récupère les colonnes numériques de df_clust pour les boxplots
+vars_marche <- colnames(df_clust)[sapply(df_clust, is.numeric)]
+vars_marche <- vars_marche[!vars_marche %in% c("ClusterID", "AgeMonths")]
+
+# Df format long pour fig descriptives
+df_long <- df %>%
+  pivot_longer(cols = all_of(vars_marche), 
+               names_to = "Variable", 
+               values_to = "Valeur")
+
+# 3.2 Création des Boxplots Individuels avec nettoyage des noms
+if(!dir.exists("Boxplots_Individuels")) dir.create("Boxplots_Individuels")
+
+# Vos couleurs manuelles
+mes_couleurs <- c("1" = "#3498db", "2" = "#e74c3c")
+
+for (v in vars_marche) {
+  
+  # --- LOGIQUE DE NETTOYAGE DU NOM ---
+  clean_label <- v
+  
+  # 1. On retire "Mean_"
+  clean_label <- gsub("^Mean_", "", clean_label)
+  
+  # 2. Cas spécifique : Norm Gait Speed -> unité (ua)
+  if (grepl("Norm Gait Speed", clean_label, ignore.case = TRUE)) {
+    clean_label <- "Norm Gait Speed (ua)"
+  }
+  
+  # 3. On remplace "CV_" par "C.V. " et on force l'unité (%)
+  # (Sauf si c'est déjà traité par le cas Norm Gait Speed plus haut)
+  if (startsWith(v, "CV_")) {
+    clean_label <- gsub("^CV_", "C.V. ", clean_label)
+    clean_label <- paste0(gsub(" \\(.*\\)", "", clean_label), " (%)")
+  }
+  
+  # 4. On remplace "SI_" par "S.I. " et on retire TOUTE unité
+  if (startsWith(v, "SI_")) {
+    clean_label <- gsub("^SI_", "S.I. ", clean_label)
+    clean_label <- gsub(" \\(.*\\)", "", clean_label)
+  }
+  
+  # --- CONSTRUCTION DU GRAPHIQUE ---
+  p <- ggplot(df, aes(x = factor(ClusterID), y = .data[[v]], fill = factor(ClusterID))) +
+    geom_boxplot(alpha = 0.7, outlier.shape = NA) +
+    geom_jitter(width = 0.1, alpha = 0.4, size = 1) +
+    scale_fill_manual(values = mes_couleurs) + 
+    labs(title = clean_label, 
+         x = "Cluster ID", 
+         y = clean_label, 
+         fill = "Cluster") + # Note 'caption' retirée ici
+    theme_classic() +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold", size = 12),
+      axis.title.y = element_text(size = 10)
+    )
+  
+  # Sauvegarde
+  file_name <- gsub("[^[:alnum:]]", "_", v)
+  ggsave(paste0("Boxplots_Individuels/Boxplot_", file_name, ".png"), 
+         plot = p, width = 12, height = 10, units = "cm")
+}
+# Boxplots enregistrées dans "Clustering"
 
 
 
-# 4 - TABLEAU RÉCAPITULATIF (Mean ± SD) & TESTS STATISTIQUES
-# 4.1. Sélection automatique des variables de marche uniquement
-# On exclut tout ce qui est ID, Metadata ou Groupage
+
+# 4 - TABLEAU RÉCAPITULATIF (Médiane [IQR]) & TESTS STATISTIQUES
+# -----------------------------------------------------------
+
+# 4.1. Sélection automatique des variables
 vars_exclude <- c("Participant", "ClusterID", "Condition", "Sex", "AgeMonths", 
                   "AgeGroup", "AgeGroup.x", "AgeGroup.y", "AgeMonths.x", 
                   "AgeMonths.y", "Sex_EN", "AgeGroup_EN", "Condition_EN")
 
 vars_gait <- colnames(df)[!colnames(df) %in% vars_exclude]
 
-# 4.2. Calcul des Moyennes et SD par Cluster
+# 4.2. Calcul des Médianes et IQR (25ème et 75ème percentiles)
 summary_table <- df %>%
-  select(ClusterID, AgeMonths.y, all_of(vars_gait)) %>%
+  select(ClusterID, any_of("AgeMonths.y"), all_of(vars_gait)) %>%
   group_by(ClusterID) %>%
   summarise(across(everything(), 
-                   list(mean = ~mean(.x, na.rm = TRUE), 
-                        sd = ~sd(.x, na.rm = TRUE)))) %>%
+                   list(med = ~median(.x, na.rm = TRUE), 
+                        q25 = ~quantile(.x, 0.25, na.rm = TRUE),
+                        q75 = ~quantile(.x, 0.75, na.rm = TRUE)))) %>%
   pivot_longer(cols = -ClusterID, 
                names_to = c("Variable", ".value"), 
-               names_sep = "_(?=[^_]+$)") # Sépare au dernier underscore
+               names_sep = "_(?=[^_]+$)")
 
-# 4.3. Formatage pour le manuscrit (Mean ± SD)
+# 4.3. Nettoyage et Formatage Médiane [IQR]
 summary_formatted <- summary_table %>%
-  mutate(Mean_SD = paste0(round(mean, 2), " ± ", round(sd, 2))) %>%
-  select(ClusterID, Variable, Mean_SD) %>%
-  pivot_wider(names_from = ClusterID, values_from = Mean_SD, names_prefix = "Cluster_")
+  mutate(
+    CleanVar = Variable,
+    CleanVar = gsub("^Mean_", "", CleanVar),
+    CleanVar = if_else(grepl("Norm Gait Speed", CleanVar, ignore.case = TRUE), "Norm Gait Speed (ua)", CleanVar),
+    CleanVar = if_else(grepl("^CV_", CleanVar), paste0(gsub("^CV_", "C.V. ", gsub(" \\(.*\\)", "", CleanVar)), " (%)"), CleanVar),
+    CleanVar = if_else(grepl("^SI_", CleanVar), gsub("^SI_", "S.I. ", gsub(" \\(.*\\)", "", CleanVar)), CleanVar),
+    # Formatage de la cellule
+    Med_IQR = paste0(round(med, 2), " [", round(q25, 2), " - ", round(q75, 2), "]")
+  ) %>%
+  select(ClusterID, CleanVar, Med_IQR) %>%
+  pivot_wider(names_from = ClusterID, values_from = Med_IQR, names_prefix = "Cluster_") %>%
+  rename(Variable = CleanVar)
 
-# 4.4 Tests de Mann-Whitney (Wilcoxon) entre les deux Clusters
-stats_tests <- df %>%
-  select(ClusterID, AgeMonths.y, all_of(vars_gait)) %>%
+# 4.4 & 4.5. Tests de Wilcoxon avec Sécurité Anti-Erreur
+stats_tests_clean <- df %>%
+  select(ClusterID, any_of("AgeMonths.y"), all_of(vars_gait)) %>%
   pivot_longer(cols = -ClusterID, names_to = "Variable", values_to = "Value") %>%
   group_by(Variable) %>%
-  wilcox_test(Value ~ ClusterID) %>%
-  add_significance()
+  wilcox_test(Value ~ ClusterID)
 
-# 4.5. Fusion et Nettoyage Final du Tableau
+# SÉCURITÉ : AJOUT DES ÉTOILES SI ELLES MANQUENT ---
+# Si le test n'a pas généré p.signif, on le crée manuellement
+if (!"p.signif" %in% colnames(stats_tests_clean)) {
+  stats_tests_clean <- stats_tests_clean %>% add_significance("p")
+}
+
+# NETTOYAGE DES NOMS (IDENTIQUE AU TABLEAU SUMMARY) ---
+stats_tests_clean <- stats_tests_clean %>%
+  mutate(
+    Variable = gsub("^Mean_", "", Variable),
+    Variable = if_else(grepl("Norm Gait Speed", Variable, ignore.case = TRUE), "Norm Gait Speed (ua)", Variable),
+    Variable = if_else(grepl("^CV_", Variable), paste0(gsub("^CV_", "C.V. ", gsub(" \\(.*\\)", "", Variable)), " (%)"), Variable),
+    Variable = if_else(grepl("^SI_", Variable), gsub("^SI_", "S.I. ", gsub(" \\(.*\\)", "", Variable)), Variable),
+    Variable = dplyr::recode(Variable, "AgeMonths.y" = "Age (months)")
+  )
+
+# FUSION SÉCURISÉE ---
+# On vérifie quelles colonnes existent réellement pour ne pas faire planter select()
+cols_disponibles <- intersect(c("Variable", "p", "p.signif"), colnames(stats_tests_clean))
+
 final_stats_table <- left_join(summary_formatted, 
-                               stats_tests %>% select(Variable, p, p.signif), 
-                               by = "Variable") %>%
-  mutate(Variable = recode(Variable, "AgeMonths.y" = "Age (months)"))
+                               stats_tests_clean %>% select(all_of(cols_disponibles)), 
+                               by = "Variable")
 
-# 4.6. AFFICHAGE ET EXPORT
-print("--- STATISTIQUES DESCRIPTIVES ET COMPARATIVES ---")
-print(final_stats_table)
-# Export en CSV pour Excel
-write.csv(final_stats_table, "Table_Clusters_Gait_Stats.csv", row.names = FALSE)
+# 4.6. EXPORT ET MISE EN FORME GRAPHIQUE
 
-# On retire les variables anthropométriques demandées
+# On retire les variables anthropométriques et on formate les p-values
 table_to_export <- final_stats_table %>%
   filter(!Variable %in% c("Height_cm", "Weight_kg", "L0_m", "IMC")) %>%
-  # Optionnel : Arrondir les p-values pour plus de clarté
   mutate(p = format.pval(p, digits = 2, eps = 0.001))
 
-# Définition d'un thème visuel pour le tableau
-# Cela rend le tableau "propre" (alternance de couleurs de lignes, etc.)
+# Thème du tableau
 tt <- ttheme_default(
-  core = list(fg_params=list(cex = 0.8), # Taille du texte corps
-              bg_params=list(fill=c("grey95", "white"), col=NA)), # Lignes alternées
-  colhead = list(fg_params=list(cex = 0.9, fontface="bold"), # Taille entête
+  core = list(fg_params=list(cex = 0.7), 
+              bg_params=list(fill=c("grey95", "white"), col=NA)),
+  colhead = list(fg_params=list(cex = 0.8, fontface="bold"), 
                  bg_params=list(fill="grey80"))
 )
 
-# Création de l'objet graphique
+# Création du tableau graphique
 g_table <- tableGrob(table_to_export, rows = NULL, theme = tt)
 
-# EXPORTATION
-# Enregistrement en PNG (Haute Résolution)
-png("Table_Stats_Descriptives.png", width = 20, height = 25, units = "cm", res = 300)
-grid.draw(g_table)
-dev.off()
+# 5) Ajout des annotations en bas du tableau
+notes <- textGrob("Values are Median [Interquartile Range]. P-values calculated using Wilcoxon rank-sum test.\nC.V. = Coefficient of Variation (%); S.I. = Symmetry Index; (ua) = arbitrary units.", 
+                  x = 0, hjust = 0, vjust = 1, 
+                  gp = gpar(fontsize = 8, fontitalic = TRUE))
 
-# Enregistrement en PDF
-pdf("Table_Stats_Descriptives.pdf", width = 8.5, height = 11) # Format lettre standard
-grid.draw(g_table)
-dev.off()
+# Assemblage : On ajoute une ligne de 2 cm pour la note
+final_plot <- gtable_add_rows(g_table, heights = unit(2, "cm"))
+final_plot <- gtable_add_grob(final_plot, notes, t = nrow(final_plot), l = 1, r = ncol(final_plot))
 
-print("Le tableau a été exporté en PNG et PDF.")
+# --- CALCUL AUTOMATIQUE DE LA HAUTEUR ---
+# On compte le nombre de lignes + entête + la note (environ 0.8 cm par ligne de donnée)
+hauteur_calculee <- (nrow(table_to_export) * 0.8) + 4 
+
+# EXPORTATION AVEC GGSAVE (Remplace png() et pdf())
+ggsave("Table_Stats_Descriptives.png", 
+       plot = final_plot, 
+       width = 22, 
+       height = hauteur_calculee, 
+       units = "cm", 
+       dpi = 300, 
+       bg = "white")
+
+ggsave("Table_Stats_Descriptives.pdf", 
+       plot = final_plot, 
+       width = 22, 
+       height = hauteur_calculee, 
+       units = "cm", 
+       bg = "white")
+
+print(paste("Le tableau a été exporté. Hauteur utilisée :", round(hauteur_calculee, 1), "cm"))
+
 
 
 
@@ -111,14 +226,14 @@ print("Le tableau a été exporté en PNG et PDF.")
 tab_sexe <- table(df$Sex, df$ClusterID)
 chi2_sexe <- chisq_test(tab_sexe)
 
-tab_age <- table(df$AgeGroup.x, df$ClusterID)
+tab_age <- table(df$AgeGroup, df$ClusterID)
 chi2_age <- chisq_test(tab_age)
 
 tab_surface <- table(df$Condition, df$ClusterID)
 chi2_surface <- chisq_test(tab_surface)
 
 # 5.1. Vérifier les chiffres réels pour l'Âge
-table(df$AgeGroup.x, df$ClusterID)
+table(df$AgeGroup, df$ClusterID)
 
 # 5.2. Vérifier les chiffres réels pour le Sexe
 table(df$Sex, df$ClusterID)
@@ -137,7 +252,7 @@ print(chi2_surface)
 chi2_results <- bind_rows(
   mutate(chi2_age, Variable = "Age Group"),
   mutate(chi2_sexe, Variable = "Sex"),
-  mutate(chi2_surface, Variable = "Surface Condition")
+  mutate(chi2_surface, Variable = "Surface")
 ) %>%
   select(Variable, n, statistic, df, p) %>%
   # Ajouter les étoiles de significativité
@@ -170,11 +285,12 @@ print("Le tableau des résultats Chi² a été exporté.")
 
 
 
+
 # 6. Observer les migrations des participants entre les 2 clusters
 # 6.1. On prépare un tableau large pour comparer Plat vs High
 migration_df <- df %>%
   filter(Condition %in% c("Plat", "High")) %>%
-  select(Participant, AgeGroup.x, Condition, ClusterID) %>%
+  select(Participant, AgeGroup, Condition, ClusterID) %>%
   pivot_wider(names_from = Condition, values_from = ClusterID) %>%
   # On crée une colonne qui indique s'il y a eu migration
   mutate(Migration = if_else(Plat == High, "Stable", "Migrant")) %>%
@@ -188,7 +304,7 @@ View(les_migrants)
 
 # 6.3. Tableau récapitulatif par groupe d'âge
 recap_migration <- migration_df %>%
-  group_by(AgeGroup.x) %>%
+  group_by(AgeGroup) %>%
   summarise(
     Total = n(),
     Nb_Migrants = sum(Migration == "Migrant"),
@@ -197,6 +313,8 @@ recap_migration <- migration_df %>%
   arrange(desc(Perc_Migrants))
 
 print(recap_migration)
+
+
 
 
 # ___________________________________________________________________________
@@ -208,7 +326,7 @@ print(recap_migration)
 df <- df %>%
   mutate(
     # On renomme et on ordonne en une seule étape
-    AgeGroup_EN = factor(AgeGroup.x, 
+    AgeGroup_EN = factor(AgeGroup, 
                          levels = c("JeunesEnfants", "Enfants", "Adolescents", "Adultes"),
                          labels = c("Young Children", "Children", "Adolescents", "Adults")),
     
@@ -277,16 +395,16 @@ library(patchwork)
 # 1. Préparation des labels de légende avec les % calculés en Section II
 # On utilise votre tableau 'recap_migration' pour extraire les valeurs exactes
 labels_avec_perc <- c(
-  "Young Children" = paste0("Young Children (", recap_migration$Perc_Migrants[recap_migration$AgeGroup.x == "JeunesEnfants"], "%)"),
-  "Children"       = paste0("Children (", recap_migration$Perc_Migrants[recap_migration$AgeGroup.x == "Enfants"], "%)"),
-  "Adolescents"    = paste0("Adolescents (", recap_migration$Perc_Migrants[recap_migration$AgeGroup.x == "Adolescents"], "%)"),
-  "Adults"         = paste0("Adults (", recap_migration$Perc_Migrants[recap_migration$AgeGroup.x == "Adultes"], "%)")
+  "Young Children" = paste0("Young Children (", recap_migration$Perc_Migrants[recap_migration$AgeGroup == "JeunesEnfants"], "%)"),
+  "Children"       = paste0("Children (", recap_migration$Perc_Migrants[recap_migration$AgeGroup == "Enfants"], "%)"),
+  "Adolescents"    = paste0("Adolescents (", recap_migration$Perc_Migrants[recap_migration$AgeGroup == "Adolescents"], "%)"),
+  "Adults"         = paste0("Adults (", recap_migration$Perc_Migrants[recap_migration$AgeGroup == "Adultes"], "%)")
 )
 
 # 2. Préparation des données pour le flux
 df_flux <- migration_df %>%
   mutate(
-    AgeGroup_EN = factor(AgeGroup.x, 
+    AgeGroup_EN = factor(AgeGroup, 
                          levels = c("JeunesEnfants", "Enfants", "Adolescents", "Adultes"),
                          labels = c("Young Children", "Children", "Adolescents", "Adults")),
     # On force l'ordre des clusters pour la clarté visuelle (1 en bas, 2 en haut)

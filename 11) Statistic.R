@@ -1,10 +1,10 @@
 ## Script en 3 parties 
-# I. Stat.descriptives
-# II. Comparaison 
-# III. LMM & Post-hocs
+# I. Stat.descriptives pop.
+# II. Comparaison STP variables & tableau descriptif
+# III. LMM & Post-hocs sur variables d'intérêt
 
 ## ============================================================
-## I. STATISTIQUES DESCRIPTIVES
+## I. STATISTIQUES DESCRIPTIVES POPULATION
 ## ============================================================
 ## =========================================================
 ## =========================================================
@@ -115,66 +115,771 @@ gt::gtsave(gt_table, "Table1_participants.pdf")
 print("Parti I effectuée avec succés ! On a la Table 1")
 
 
+
+
 ## ============================================================
 ## II. MOYENNE +- SD DES VARIABLES SPT
 ## ============================================================
 
-setwd('C:/Users/silve/Desktop/DOCTORAT/UNIV MONTREAL/TRAVAUX-THESE/Surfaces_Irregulieres/Datas/Script/gaitAnalysisGUI/result')
+# ---------------------------------------------------------
+# 0) Préparation de l'environnement
+# ---------------------------------------------------------
+setwd('C:/Users/silve/Desktop/DOCTORAT/UNIV MONTREAL/TRAVAUX-THESE/Surfaces_Irregulieres/Datas/Script/gaitAnalysisGUI/result/Statistical_Analysis_LMM/Prepared_Data')
 
-# Import useful Libraries to the script
+library(tidyverse)
 library(readr)
-library(dplyr)
-library(openxlsx)
+library(gt)
 
-# Define .csv path
-chemin <- "C:/Users/silve/Desktop/DOCTORAT/UNIV MONTREAL/TRAVAUX-THESE/Surfaces_Irregulieres/Datas/Script/gaitAnalysisGUI/result" # Aller chercher le document dans un dossier
-df <- read.csv(file.path(chemin,"ACP_Clustering_DATA.csv"), sep = ";")
+# ---------------------------------------------------------
+# 1) Chargement du fichier de données
+# ---------------------------------------------------------
+file_path <- "C:/Users/silve/Desktop/DOCTORAT/UNIV MONTREAL/TRAVAUX-THESE/Surfaces_Irregulieres/Datas/Script/gaitAnalysisGUI/result/Statistical_Analysis_LMM/Prepared_Data/ACP_Clustering_DATA.csv"   # adapter si besoin
 
-# Overview of the data set
-glimpse(df)
+# Lecture robuste (gère séparateur ; ou ,)
+first_line <- readLines(file_path, n = 1, warn = FALSE)
+delim <- ifelse(grepl(";", first_line), ";", ",")
+df <- read_delim(file_path, delim = delim, show_col_types = FALSE)
 
-# Change characters variable to factor
-df <- df %>%
+# ---------------------------------------------------------
+# 2) Standardisation des noms de colonnes (pour matcher variables_interet)
+#    Objectif : uniformiser les unités et remplacer espaces/ponctuation par "_"
+# ---------------------------------------------------------
+standardize_names <- function(x) {
+  x %>%
+    # 1) trim + remplacer espaces / ponctuation par _
+    str_trim() %>%
+    str_replace_all("[[:space:]]+", "_") %>%
+    str_replace_all("[\\-]+", "_") %>%
+    str_replace_all("[,;:]+", "_") %>%
+    
+    # 2) unités / parenthèses -> suffixes normalisés
+    str_replace_all("\\(mm\\)", "mm") %>%
+    str_replace_all("\\(%L0\\)", "pL0") %>%
+    str_replace_all("\\(ua\\)", "ua") %>%
+    str_replace_all("\\(%\\)", "p") %>%
+    str_replace_all("\\(m\\.s\\^\\{-1\\}\\)", "ms1") %>%
+    str_replace_all("\\(step\\.min\\^\\{-1\\}\\)", "stepmin1") %>%
+    
+    # 3) enlever parenthèses restantes
+    str_replace_all("[\\(\\)]", "") %>%
+    
+    # 4) cleanup underscores
+    str_replace_all("__+", "_") %>%
+    str_replace_all("_$", "")
+}
+
+names(df) <- standardize_names(names(df))
+
+# Optionnel : vérifier les noms standardisés
+# print(names(df))
+
+# ---------------------------------------------------------
+# 3) Définition des variables d’intérêt (dans l’ordre souhaité)
+# ---------------------------------------------------------
+variables_interet <- c(
+  "NCycles_Left", "NCycles_Right",
+  
+  "Mean_Gait_speed_m.s^{_1}", "Mean_Norm_Gait_Speed_m.s^{_1}", "Mean_Step_length_m", "Mean_Stride_length_m",  "Mean_Norm_Step_length_ua", "Mean_WalkRatio", "Mean_Norm_WR_ua",
+  
+  "Mean_Double_support_time_p", "Mean_Cadence_step.min^{_1}", "Mean_Norm_Cadence_ua", "Mean_COM_SPARC_Magnitude_ua", "Mean_StepTime_s", "Mean_StanceTime_s", "Mean_SwingTime_s",
+  
+  "Mean_StepWidth_cm", "Mean_Norm_StepWidth_ua", "Mean_MoS_AP_HS_mm", "Mean_MoS_ML_HS_mm", "Mean_MoS_AP_Stance_mm", "Mean_MoS_ML_Stance_mm", "Mean_MoS_AP_HS_pL0", "Mean_MoS_ML_HS_pL0", "Mean_MoS_AP_Stance_pL0", "Mean_MoS_ML_Stance_pL0",
+  
+  "Mean_GVI_ua", "CV_Norm_StepWidth_ua", "CV_Gait_speed_m.s^{_1}",
+  
+  "SI_Stride_length_m", "SI_Double_support_time_p", "SI_Norm_StepWidth_ua"
+)
+
+# ---------------------------------------------------------
+# 4) Identification automatique des colonnes AgeGroup et Surface
+# ---------------------------------------------------------
+age_candidates <- c("AgeGroup", "Groupe", "Age_Group", "AgeGroup.x", "AgeGrp")
+surf_candidates <- c("Surface", "Condition", "Surf")
+
+age_col  <- intersect(age_candidates, names(df))[1]
+surf_col <- intersect(surf_candidates, names(df))[1]
+
+if (is.na(age_col) || is.na(surf_col)) {
+  stop(
+    "Impossible de trouver les colonnes AgeGroup / Surface.\n",
+    "Colonnes dispo: ", paste(names(df), collapse = ", "), "\n",
+    "Renomme tes colonnes ou modifie age_candidates / surf_candidates."
+  )
+}
+
+# ---------------------------------------------------------
+# 5) Vérification des variables disponibles (présentes vs absentes)
+# ---------------------------------------------------------
+vars_present <- intersect(variables_interet, names(df))
+vars_missing <- setdiff(variables_interet, names(df))
+
+if (length(vars_missing) > 0) {
+  message("Variables absentes dans le fichier (ignorées) :\n- ", paste(vars_missing, collapse = "\n- "))
+}
+if (length(vars_present) == 0) stop("Aucune variable_interet trouvée dans le fichier.")
+
+# ---------------------------------------------------------
+# 6) Passage au format long + calcul des descriptifs (moyenne, SD, n)
+# ---------------------------------------------------------
+df_long <- df %>%
   mutate(
-    AgeGroup = factor(AgeGroup,
-                      levels = c("JeunesEnfants", "Enfants", "Adolescents", "Adultes")),
-    Surface = factor(Surface,
-                     levels = c("Plat", "Medium", "High"))
-  )
+    AgeGroup = as.factor(.data[[age_col]]),
+    Surface  = as.factor(.data[[surf_col]])
+  ) %>%
+  filter(Surface %in% c("Plat", "Medium", "High")) %>%
+  select(AgeGroup, Surface, all_of(vars_present)) %>%
+  pivot_longer(cols = all_of(vars_present), names_to = "Variable", values_to = "Value") %>%
+  mutate(Value = suppressWarnings(as.numeric(Value)))
 
-# Descriptive Statistics 
-desc_stats <- df %>%
-  group_by(AgeGroup, Surface) %>%
+desc <- df_long %>%
+  group_by(AgeGroup, Surface, Variable) %>%
   summarise(
-    n = n(),
-    across(
-      where(is.numeric),
-      list(
-        mean   = ~mean(.x, na.rm = TRUE),
-        sd     = ~sd(.x, na.rm = TRUE),
-        median = ~median(.x, na.rm = TRUE),
-        IQR    = ~IQR(.x, na.rm = TRUE)
-      ),
-      .names = "{.col}_{.fn}"
-    ),
+    n    = sum(!is.na(Value)),
+    mean = mean(Value, na.rm = TRUE),
+    sd   = sd(Value, na.rm = TRUE),
     .groups = "drop"
+  ) %>%
+  mutate(cell = ifelse(
+    n == 0, "",
+    sprintf("%.2f \u00B1 %.2f (n=%d)", mean, sd, n)
+  )) %>%
+  select(AgeGroup, Surface, Variable, cell)
+
+# ---------------------------------------------------------
+# 7) Mise en forme "large" : colonnes = (AgeGroup x Surface)
+# ---------------------------------------------------------
+tab_wide <- desc %>%
+  mutate(col = paste0(as.character(AgeGroup), "___", as.character(Surface))) %>%
+  select(Variable, col, cell) %>%
+  pivot_wider(names_from = col, values_from = cell) %>%
+  arrange(match(Variable, variables_interet))
+
+# ---------------------------------------------------------
+# 8) Fonction d'étiquetage "publication" (affichage seulement)
+#    - retire "Mean_"
+#    - applique unités (mm, cm, m, s, %, %L0, ua, m/s, step/min)
+#    - CV -> "C.V ... (%)"
+#    - SI -> "S.I ..." (sans unité)
+#    - remplace "_" par espaces
+# ---------------------------------------------------------
+make_pretty_label <- function(varname) {
+  
+  v <- varname
+  
+  # 1) Retirer le préfixe Mean_ dans l'affichage
+  v <- str_replace(v, "^Mean_", "")
+  
+  # SI / CV : format publication
+  is_cv <- str_detect(v, "^CV_")
+  is_si <- str_detect(v, "^SI_")
+  
+  if (is_cv) {
+    # garder uniquement "CV_<nom_variable>" et jeter tout ce qui suit (unité, même si underscores)
+    v <- str_replace(v, "^(CV_[^_]+_[^_]+).*$", "\\1")
+    v <- str_replace(v, "^CV_", "")
+    v <- paste0("C.V ", v, " (%)")
+  }
+  
+  if (is_si) {
+    # garder uniquement "SI_<nom_variable>" (sans unité)
+    v <- str_replace(v, "^(SI_[^_]+_[^_]+).*$", "\\1")
+    v <- str_replace(v, "^SI_", "")
+    v <- paste0("S.I ", v)
+  }
+  
+  # 2) Unités (suffixes) -> format publication
+  v <- str_replace(v, "_mm$", " (mm)")
+  v <- str_replace(v, "_cm$", " (cm)")
+  v <- str_replace(v, "_m$",  " (m)")
+  v <- str_replace(v, "_s$",  " (s)")
+  v <- str_replace(v, "_pL0$", " (%L0)")
+  v <- str_replace(v, "_p$",   " (%)")
+  v <- str_replace(v, "_ua$",  " (ua)")
+  
+  # Vitesse / cadence : gérer variantes “ms1” / “m.s^{-1}” / “m.s^{_1}”
+  v <- str_replace(v, "_ms1$", " (m/s)")
+  v <- str_replace(v, "_m\\.s\\^\\{-1\\}$", " (m/s)")
+  v <- str_replace(v, "_m\\.s\\^\\{_1\\}$", " (m/s)")
+  v <- str_replace(v, "_m\\.s\\^\\{\\-1\\}$", " (m/s)")
+  v <- str_replace(v, "_m\\.s\\^\\{\\-?1\\}$", " (m/s)")
+  
+  v <- str_replace(v, "_stepmin1$", " (step/min)")
+  v <- str_replace(v, "_step\\.min\\^\\{-1\\}$", " (step/min)")
+  v <- str_replace(v, "_step\\.min\\^\\{_1\\}$", " (step/min)")
+  v <- str_replace(v, "_step\\.min\\^\\{\\-1\\}$", " (step/min)")
+  v <- str_replace(v, "_step\\.min\\^\\{\\-?1\\}$", " (step/min)")
+  
+  # 3) Exception demandée : Norm Gait Speed doit être (ua) même si m/s
+  v <- str_replace(v, "^Norm Gait Speed \\(m/s\\)$", "Norm Gait Speed (ua)")
+  v <- str_replace(v, "^Norm_Gait_Speed \\(m/s\\)$", "Norm Gait Speed (ua)")
+  v <- str_replace(v, "^Norm_Gait_Speed$", "Norm Gait Speed (ua)")
+  v <- str_replace(v, "^Norm Gait Speed$", "Norm Gait Speed (ua)")
+  
+  # 4) Rendre lisible : underscores -> espaces
+  v <- str_replace_all(v, "_", " ")
+  
+  # 5) Petites mises en forme (optionnel mais utile pour article)
+  v <- str_replace_all(v, "\\bAP\\b", "AP")
+  v <- str_replace_all(v, "\\bML\\b", "ML")
+  v <- str_replace_all(v, "\\bHS\\b", "HS")
+  
+  # Double support time : harmoniser
+  v <- str_replace_all(v, "Double support time", "Double support time")
+  v <- str_replace_all(v, "Double support", "Double support")
+  
+  # SI / CV : garder le préfixe explicite
+  v <- str_replace(v, "^SI ", "S.I. ")
+  v <- str_replace(v, "^CV ", "C.V. ")
+  
+  # NCycles : rendre plus propre
+  v <- str_replace(v, "^NCycles Left$", "N cycles Left")
+  v <- str_replace(v, "^NCycles Right$", "N cycles Right")
+  
+  # Trim final
+  v <- str_trim(v)
+  
+  return(v)
+}
+
+# ---------------------------------------------------------
+# 9) Forcer l'ordre des colonnes : Groupes d'âge puis Surfaces
+#    (important : gt ne réordonne pas les colonnes, il faut le faire avant)
+# ---------------------------------------------------------
+age_order <- c("JeunesEnfants", "Enfants", "Adolescents", "Adultes")
+surface_levels <- c("Plat", "Medium", "High")
+
+wanted_cols <- as.vector(outer(age_order, surface_levels, paste, sep = "___"))
+wanted_cols <- wanted_cols[wanted_cols %in% names(tab_wide)]  # garde seulement celles présentes
+
+tab_wide <- tab_wide %>%
+  select(Variable, all_of(wanted_cols))
+
+# ---------------------------------------------------------
+# 10) Construction du mapping : nom technique -> label publication
+# ---------------------------------------------------------
+variable_labels <- setNames(
+  vapply(tab_wide$Variable, make_pretty_label, character(1)),
+  tab_wide$Variable
+)
+
+# ---------------------------------------------------------
+# 11) Création de la table GT + application des labels "publication"
+# ---------------------------------------------------------
+gt_tbl <- gt(tab_wide) %>%
+  cols_label(Variable = "Variables") %>%
+  tab_options(table.font.size = px(12)) %>%
+  text_transform(
+    locations = cells_body(columns = Variable),
+    fn = function(x) unname(variable_labels[x])
   )
 
-desc_mean_sd <- df %>%
-  group_by(AgeGroup, Surface) %>%
-  summarise(
-    across(
-      where(is.numeric),
-      ~sprintf("%.2f ± %.2f",
-               mean(.x, na.rm = TRUE),
-               sd(.x, na.rm = TRUE))
-    ),
-    .groups = "drop"
+# ---------------------------------------------------------
+# 12) Ajout des spanners : Groupes d’âge -> sous-colonnes Surface
+# ---------------------------------------------------------
+col_names <- setdiff(names(tab_wide), "Variable")
+
+age_levels <- age_order[age_order %in% sub("___.*$", "", col_names)]
+surface_levels <- c("Plat", "Medium", "High")
+
+# Traduction des groupes d'âge (affichage uniquement)
+age_labels_en <- c(
+  JeunesEnfants = "Young Children",
+  Enfants       = "Children",
+  Adolescents   = "Adolescents",
+  Adultes       = "Adults"
+)
+
+surface_labels_en <- c(
+  Plat   = "Even",
+  Medium = "Medium",
+  High   = "High"
+)
+
+# (A) Renommer les sous-colonnes
+for (cn in col_names) {
+  surf <- sub("^.*___", "", cn)
+  gt_tbl <- gt_tbl %>% cols_label(!!cn := surface_labels_en[surf])
+}
+
+# (B) Ajouter les spanners par groupe d’âge, dans l’ordre défini
+for (ag in age_levels) {
+  cols_ag <- paste0(ag, "___", surface_levels)
+  cols_ag <- cols_ag[cols_ag %in% col_names]
+  
+  gt_tbl <- gt_tbl %>%
+    tab_spanner(label = age_labels_en[ag], columns = all_of(cols_ag))
+}
+
+# ---------------------------------------------------------
+# 13) Affichage & Export
+# ---------------------------------------------------------
+gt_tbl <- gt_tbl %>%
+  tab_header(
+    title = "Descriptive values of gait parameters according to age group and walking surface",
+    subtitle = "Values are reported as Mean ± SD (n)"
   )
 
-write.xlsx(desc_stats,
-           file = "Descriptives_AgeGroup_Surface.xlsx",
-           overwrite = TRUE)
+gt_tbl
+View(gt_tbl)
+
+gtsave(gt_tbl, "Table_Descriptive_Gait_AgeGroup_Surface.pdf")
+
+# ---------------------------------------------------------
+# 14) Construction figures de l'ensemble des variables d'intérêt
+# ---------------------------------------------------------
+
+output_dir <- "Boxplots_Gait_Results"
+if (!dir.exists(output_dir)) dir.create(output_dir)
+
+generate_gait_boxplot <- function(var_name, data) {
+  # Récupérer le label "propre" via ta fonction existante
+  pretty_title <- make_pretty_label(var_name)
+  
+  # Préparation des données
+  df_plot <- data %>%
+    select(AgeGroup, Surface, all_of(var_name)) %>%
+    rename(Value = !!sym(var_name)) %>%
+    mutate(
+      Value = as.numeric(as.character(Value)),
+      AgeGroup = factor(AgeGroup, 
+                        levels = c("JeunesEnfants", "Enfants", "Adolescents", "Adultes"),
+                        labels = c("Young Children", "Children", "Adolescents", "Adults")),
+      Surface = factor(Surface, 
+                       levels = c("Plat", "Medium", "High"),
+                       labels = c("Even", "Medium", "High"))
+    ) %>%
+    filter(!is.na(Value))
+  
+  # Création du graphique
+  p <- ggplot(df_plot, aes(x = AgeGroup, y = Value, fill = Surface)) +
+    geom_boxplot(position = position_dodge(0.85), width = 0.7, 
+                 alpha = 0.7, outlier.shape = NA, color = "black") +
+    geom_jitter(aes(group = Surface),
+                position = position_dodge(0.85), 
+                size = 1.2, alpha = 0.3, color = "black") +
+    scale_fill_manual(values = c("Even" = "blue", "Medium" = "green", "High" = "red")) +
+    labs(
+      title = paste(pretty_title, "across age groups and surfaces"),
+      y = pretty_title,
+      x = "Age Group",
+      fill = "Surface"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      legend.position = "bottom",
+      panel.grid.major.x = element_blank()
+    )
+  
+  # Sauvegarde automatique
+  file_name <- paste0(output_dir, "/", var_name, ".png")
+  ggsave(file_name, plot = p, width = 8, height = 6, dpi = 300)
+  file_name2 <- paste0(output_dir, "/", var_name, ".pdf")
+  ggsave(file_name2, plot = p, width = 10, height = 8)
+  
+  return(p)
+}
+
+# Appliquer la fonction à chaque variable
+message("Génération des boxplots en cours...")
+
+# On utilise walk de purrr (inclus dans tidyverse) pour boucler sans afficher de sortie inutile
+walk(vars_present, ~generate_gait_boxplot(.x, df))
+
+message("Terminé ! Les graphiques sont dans le dossier : ", output_dir)
+
+
+# ---------------------------------------------------------
+# 15) Génération des RADAR PLOTS par surface
+# ---------------------------------------------------------
+
+# 15.1) Définition des variables incluses dans le radar
+vars_radar <- c(
+  "Mean_Gait_speed_m.s^{_1}", "Mean_Norm_Gait_Speed_m.s^{_1}", "Mean_Step_length_m",
+  "Mean_Stride_length_m", "Mean_Norm_Step_length_ua", "Mean_WalkRatio", "Mean_Norm_WR_ua",
+  "Mean_Double_support_time_p", "Mean_Cadence_step.min^{_1}", "Mean_Norm_Cadence_ua",
+  "Mean_COM_SPARC_Magnitude_ua", "Mean_StepWidth_cm", "Mean_Norm_StepWidth_ua",
+  "Mean_MoS_AP_HS_pL0", "Mean_MoS_ML_HS_pL0", "Mean_MoS_AP_HS_mm", "Mean_MoS_ML_HS_mm", "Mean_GVI_ua",
+  "CV_Norm_StepWidth_ua", "CV_Gait_speed_m.s^{_1}", "SI_Stride_length_m",
+  "SI_Double_support_time_p", "SI_Norm_StepWidth_ua"
+)
+
+# 15.2) Vérification des variables présentes et préparation des labels
+# On ne garde que les variables réellement disponibles dans df (après standardisation/cleaning)
+vars_radar_present <- intersect(vars_radar, names(df))
+# Labels lisibles (mise en forme) pour l’affichage autour du radar
+radar_labels <- vapply(vars_radar_present, make_pretty_label, character(1))
+
+# 15.3) Dossier d’export
+if (!dir.exists("Radar_Plots")) dir.create("Radar_Plots")
+
+# 15.4) Palette de couleurs par groupe d’âge (pour les moyennes) et par domaine
+# Remarque : tu convertis ensuite "Adultes" -> "Adults" dans la fonction (sécurisation)
+age_colors <- c(
+  "Young Children" = "blue",
+  "Children"       = "orange",
+  "Adolescents"    = "green",
+  "Adultes"        = "purple"
+)
+
+# --- (A) Définir les domaines et leurs variables (ordre non critique ici)
+domains_vars <- list(
+  PACE = c(
+    "Mean_Gait_speed_m.s^{_1}", "Mean_Norm_Gait_Speed_m.s^{_1}",
+    "Mean_Step_length_m", "Mean_Stride_length_m",
+    "Mean_Norm_Step_length_ua", "Mean_WalkRatio", "Mean_Norm_WR_ua"
+  ),
+  RHYTHM = c(
+    "Mean_Double_support_time_p", "Mean_Cadence_step.min^{_1}",
+    "Mean_Norm_Cadence_ua", "Mean_COM_SPARC_Magnitude_ua"
+  ),
+  `POSTURAL CONTROL` = c(
+    "Mean_StepWidth_cm", "Mean_Norm_StepWidth_ua",
+    "Mean_MoS_AP_HS_pL0", "Mean_MoS_ML_HS_pL0",
+    "Mean_MoS_AP_HS_mm", "Mean_MoS_ML_HS_mm"
+  ),
+  ASYMMETRY = c(
+    "SI_Stride_length_m", "SI_Double_support_time_p", "SI_Norm_StepWidth_ua"
+  ),
+  VARIABILITY = c(
+    "Mean_GVI_ua", "CV_Norm_StepWidth_ua", "CV_Gait_speed_m.s^{_1}"
+  )
+)
+
+# --- (B) Couleurs des domaines (tu peux remplacer par tes hex exacts)
+domain_colors <- c(
+  PACE = "lightblue",
+  RHYTHM = "lightcoral",
+  `POSTURAL CONTROL` = "palegreen",
+  ASYMMETRY = "plum",
+  VARIABILITY = "lightyellow"
+)
+
+# --- (C) Fonction: associer chaque variable (dans l’ordre du radar) à son domaine
+get_domain_for_vars <- function(vars_in_radar, domains_list) {
+  dom_vec <- rep(NA_character_, length(vars_in_radar))
+  names(dom_vec) <- vars_in_radar
+  for (d in names(domains_list)) {
+    dom_vec[vars_in_radar %in% domains_list[[d]]] <- d
+  }
+  dom_vec
+}
+
+# Dessine des secteurs (wedge) par domaine selon l'ordre des variables
+draw_domain_background <- function(domains_by_var, domain_cols, alpha = 0.18, r = 1) {
+  # domains_by_var: vecteur nommé ou non, longueur = nb variables, contenant le nom du domaine pour chaque variable
+  n <- length(domains_by_var)
+  if (n < 3) return(invisible(NULL))
+  
+  # Angles des axes (radar classique: premier en haut)
+  angles <- seq(0, 2*pi, length.out = n + 1)[1:n] + (pi/2)
+  
+  # Limites entre axes = milieux angulaires
+  bounds <- angles - (pi / n)
+  bounds <- c(bounds, bounds[1] + 2*pi)
+  
+  # Pour regrouper les variables contiguës d'un même domaine
+  runs <- rle(domains_by_var)
+  idx_end <- cumsum(runs$lengths)
+  idx_start <- c(1, head(idx_end, -1) + 1)
+  
+  for (k in seq_along(runs$values)) {
+    dom <- runs$values[k]
+    if (is.na(dom)) next
+    col <- domain_cols[[dom]]
+    if (is.null(col) || is.na(col)) next
+    
+    i1 <- idx_start[k]
+    i2 <- idx_end[k]
+    
+    # bornes angulaires du bloc contigu
+    a_start <- bounds[i1]
+    a_end   <- bounds[i2 + 1]
+    
+    # points du secteur
+    aa <- seq(a_start, a_end, length.out = 80)
+    x <- c(0, r * cos(aa), 0)
+    y <- c(0, r * sin(aa), 0)
+    
+    polygon(
+      x, y,
+      col = grDevices::adjustcolor(col, alpha.f = alpha),
+      border = NA
+    )
+  }
+  
+  invisible(NULL)
+}
+
+# 15.5) Calcul des bornes min/max globales (scaling)
+# Principe :
+# - on fixe les bornes min/max de chaque variable sur l’ensemble des participants
+# - cela garantit une normalisation cohérente entre surfaces et groupes
+radar_min_max <- df %>%
+  dplyr::select(dplyr::all_of(vars_radar_present)) %>%
+  dplyr::summarise(dplyr::across(
+    dplyr::everything(),
+    list(
+      min = ~min(.x, na.rm = TRUE),
+      max = ~max(.x, na.rm = TRUE)
+    )
+  ))
+# Extraction explicite (utile pour debug/contrôle si besoin)
+mins_raw <- radar_min_max %>% dplyr::select(dplyr::ends_with("_min")) %>% unlist() %>% as.numeric()
+maxs_raw <- radar_min_max %>% dplyr::select(dplyr::ends_with("_max")) %>% unlist() %>% as.numeric()
+
+# 15.6) Nettoyage graphique (pour repartir sur une base propre)
+graphics.off()
+par(mfrow = c(1, 1))
+
+# 15.7) Fonction : création d’un radar plot pour UNE surface
+create_surface_radar <- function(surf_name, df_full, vars, labels) {
+  
+  # A) Calcul des moyennes par groupe d’âge (pour la surface)
+  data_avg <- df_full %>%
+    dplyr::filter(Surface == surf_name) %>%
+    dplyr::group_by(AgeGroup) %>%
+    dplyr::summarise(dplyr::across(dplyr::all_of(vars), ~mean(.x, na.rm = TRUE)), .groups = "drop") %>%
+    dplyr::mutate(
+      AgeGroup = factor(
+        AgeGroup,
+        levels = c("JeunesEnfants", "Enfants", "Adolescents", "Adultes"),
+        labels = c("Young Children", "Children", "Adolescents", "Adults")
+      )
+    ) %>%
+    dplyr::arrange(AgeGroup)
+  
+  # B) Extraction des données individuelles (pour la surface)
+  data_indiv <- df_full %>%
+    dplyr::filter(Surface == surf_name) %>%
+    dplyr::mutate(
+      AgeGroup = factor(
+        AgeGroup,
+        levels = c("JeunesEnfants", "Enfants", "Adolescents", "Adultes"),
+        labels = c("Young Children", "Children", "Adolescents", "Adults")
+      )
+    ) %>%
+    dplyr::select(AgeGroup, dplyr::all_of(vars))
+  
+  # C) Récupération des min/max globaux (pour normalisation)
+  mins <- as.vector(radar_min_max[grep("_min$", names(radar_min_max))])
+  maxs <- as.vector(radar_min_max[grep("_max$", names(radar_min_max))])
+  
+  # D) Normalisation des moyennes (0–1)
+  radar_df_avg <- as.data.frame(data_avg[, -1, drop = FALSE])
+  
+  normalized_avg <- as.data.frame(lapply(seq_len(ncol(radar_df_avg)), function(i) {
+    denom <- (maxs[[i]] - mins[[i]])
+    if (is.na(denom) || denom == 0) return(rep(0, nrow(radar_df_avg)))
+    (radar_df_avg[, i] - mins[[i]]) / denom
+  }))
+  
+  colnames(normalized_avg) <- labels
+  
+  # Format attendu par fmsb::radarchart :
+  # - 1ère ligne : max (=1)
+  # - 2ème ligne : min (=0)
+  # - lignes suivantes : données (ici = moyennes par groupe)
+  final_radar_avg <- rbind(rep(1, length(vars)), rep(0, length(vars)), normalized_avg)
+  
+  # E) Normalisation des individus (0–1)
+  radar_df_indiv <- data_indiv[, -1, drop = FALSE]
+  
+  normalized_indiv <- as.data.frame(lapply(seq_len(ncol(radar_df_indiv)), function(i) {
+    denom <- (maxs[[i]] - mins[[i]])
+    if (is.na(denom) || denom == 0) return(rep(0, nrow(radar_df_indiv)))
+    (radar_df_indiv[, i] - mins[[i]]) / denom
+  }))
+  
+  colnames(normalized_indiv) <- labels
+  
+  # F) Couleurs : correction du libellé Adultes -> Adults
+  age_colors_fixed <- age_colors
+  if ("Adultes" %in% names(age_colors_fixed) && !("Adults" %in% names(age_colors_fixed))) {
+    age_colors_fixed["Adults"] <- age_colors_fixed["Adultes"]
+    age_colors_fixed <- age_colors_fixed[names(age_colors_fixed) != "Adultes"]
+  }
+  
+  colors_border_avg <- age_colors_fixed
+  colors_in_avg <- grDevices::adjustcolor(colors_border_avg, alpha.f = 0.20)
+  
+  # G) Tracé en 3 couches (du fond vers l’avant)
+  # 1) Cadre (axes, grille, titre) avec polygones invisibles mais "valides"
+  # 2) Individus (gris, derrière)
+  # 3) Moyennes de groupe (couleur, devant)
+  
+  # =========================
+  # G1) Cadre du radar
+  # =========================
+  
+  ng <- nrow(data_avg)
+  transparent <- grDevices::adjustcolor("white", alpha.f = 0)  # ou "transparent"
+  
+  fmsb::radarchart(
+    final_radar_avg,
+    axistype = 0,
+    seg = 4,
+    pcol  = rep(transparent, ng),
+    pfcol = rep(transparent, ng),
+    plwd  = rep(0.01, ng),
+    plty  = rep(1, ng),
+    cglcol = "grey70", 
+    cglty = 1, 
+    cglwd = 0.8,
+    vlcex = 0.7,
+    title = paste("Gait Profile on", surf_name, "Surface across age groups")
+  )
+  
+  # === Préparation des variables pour les étiquettes ===
+  nvar <- length(vars)
+  angles <- seq(0, 2*pi, length.out = nvar + 1)[1:nvar] + (pi/2)
+  
+  pct <- c(0.25, 0.50, 0.75, 1.00)
+  r_levels <- pct
+  
+  ticks_real <- sapply(seq_len(nvar), function(i) {
+    mins[[i]] + pct * (maxs[[i]] - mins[[i]])
+  })
+  
+  # --- Fond coloré par domaine (AJOUT)
+  domains_by_var <- get_domain_for_vars(vars, domains_vars)
+  
+  par(new = TRUE)  # superpose sur le même repère
+  draw_domain_background(
+    domains_by_var = domains_by_var,
+    domain_cols    = domain_colors,
+    alpha          = 0.35,
+    r              = 1
+  )
+  
+  # === AJOUT: Affichage des étiquettes de valeurs réelles ===
+  # (APRÈS les fonds colorés pour qu'elles soient visibles)
+  for (i in seq_len(nvar)) {
+    angle <- angles[i]
+    
+    for (j in seq_along(pct)) {
+      r <- r_levels[j]
+      
+      # Position du texte (légèrement décalé vers l'extérieur)
+      x_pos <- r * cos(angle) * 1.05
+      y_pos <- r * sin(angle) * 1.05
+      
+      # Valeur réelle
+      val <- round(ticks_real[j, i], 2)
+      
+      # Afficher le texte avec fond blanc semi-transparent
+      text(
+        x = x_pos,
+        y = y_pos,
+        labels = val,
+        cex = 0.5,
+        col = "grey20",
+        font = 1
+      )
+    }
+  }
+  
+  # --- G2) Individus : tracés en gris derrière
+  indiv_col <- grDevices::adjustcolor("grey30", alpha.f = 0.18)
+  
+  for (i in seq_len(nrow(normalized_indiv))) {
+    par(new = TRUE)
+    fmsb::radarchart(
+      rbind(rep(1, length(vars)), rep(0, length(vars)), normalized_indiv[i, , drop = FALSE]),
+      axistype = 0,
+      vlabels = rep("", length(vars)),
+      pcol = indiv_col,
+      pfcol = NA,
+      plwd = 0.7,
+      plty = 1,
+      cglcol = NA,
+      axislabcol = NA,
+      vlcex = 0,
+      seg = length(vars)
+    )
+  }
+  
+  # --- G3) Moyennes : tracés colorés au premier plan
+  par(new = TRUE)
+  fmsb::radarchart(
+    final_radar_avg,
+    axistype = 0,
+    vlabels = rep("", length(vars)),
+    pcol = colors_border_avg,
+    pfcol = colors_in_avg,
+    plwd = 2.2,
+    plty = 1,
+    cglcol = NA,
+    axislabcol = NA,
+    vlcex = 0,
+    seg = length(vars)
+  )
+  
+  # --- Légende
+  legend(
+    x = "bottom",
+    legend = names(colors_border_avg),
+    inset = -0.15,
+    horiz = TRUE,
+    bty = "n",
+    pch = 20,
+    col = colors_border_avg,
+    text.col = "black",
+    cex = 0.8,
+    pt.cex = 1.5,
+    xpd = TRUE
+  )
+}
+
+# 15.8) Export PDF et PNGs: un radar par surface
+pdf("Radar_Plots/Gait_Radar_Profiles.pdf", width = 12, height = 12)
+par(mfrow = c(1, 1))
+
+for (s in c("Plat", "Medium", "High")) {
+  
+  create_surface_radar(s, df, vars_radar_present, radar_labels)
+}
+
+dev.off()   # <<< fermeture DU PDF uniquement
+
+
+# 15.9) Export PNG haute qualité (plus lisible) — sans modifier le PDF
+# ---------------------------------------------------------
+for (s in c("Plat", "Medium", "High")) {
+  
+  fname <- paste0("Radar_Plots/Gait_Radar_Profile_", s, ".png")
+  
+  png(filename = fname, width = 5200, height = 5200, res = 600, type = "cairo")
+  
+  op <- par(no.readonly = TRUE)
+  
+  par(mfrow = c(1, 1))
+  
+  # Marges plus petites => le radar prend plus de place
+  par(mar = c(8, 5, 5, 5))     # bottom, left, top, right
+  
+  # Pas de marge externe (sinon ça rétrécit le plot)
+  par(oma = c(0, 0, 0, 0))
+  
+  # Evite que R rajoute une "expansion" d'axes qui réduit visuellement le cercle
+  par(xaxs = "i", yaxs = "i")
+  
+  # Autorise texte/legend hors zone (évite coupures)
+  par(xpd = NA)
+  
+  # Texte légèrement plus petit si besoin (optionnel)
+  par(cex = 0.85)
+  
+  create_surface_radar(s, df, vars_radar_present, radar_labels)
+  
+  par(op)
+  dev.off()
+}
+
+
+
+
 
 ## ============================================================
 ## III. LMM Surface (répété) x AgeGroup (inter) + post-hocs emmeans
@@ -187,6 +892,7 @@ if(length(to_install) > 0) install.packages(to_install, dependencies = TRUE)
 
 library(readr)
 library(dplyr)
+library(tidyr)
 library(stringr)
 library(tibble)
 library(lme4)
@@ -197,11 +903,29 @@ library(purrr)
 library(openxlsx)
 
 ## 1) Chemin vers ton CSV long
-csv_path <- "C:/Users/silve/Desktop/DOCTORAT/UNIV MONTREAL/TRAVAUX-THESE/Surfaces_Irregulieres/Datas/Script/gaitAnalysisGUI/result/Statistical_Analysis_LMM/Prepared_Data/DATA_all_prepared.csv"
+csv_path <- "C:/Users/silve/Desktop/DOCTORAT/UNIV MONTREAL/TRAVAUX-THESE/Surfaces_Irregulieres/Datas/Script/gaitAnalysisGUI/result/Statistical_Analysis_LMM/Prepared_Data/ACP_Clustering_DATA.csv"
 
 ## 2) Lire le CSV
 df <- read_delim(file = csv_path, delim = ";",show_col_types = FALSE)
-names(df)
+
+# On réutilise la même logique de nettoyage que dans la Partie II
+standardize_names <- function(x) {
+  x %>%
+    str_trim() %>%
+    str_replace_all("[[:space:]]+", "_") %>%
+    str_replace_all("[\\-]+", "_") %>%
+    str_replace_all("[,;:]+", "_") %>%
+    str_replace_all("\\(mm\\)", "mm") %>%
+    str_replace_all("\\(%L0\\)", "pL0") %>%
+    str_replace_all("\\(ua\\)", "ua") %>%
+    str_replace_all("\\(%\\)", "p") %>%
+    str_replace_all("\\(m\\.s\\^\\{-1\\}\\)", "ms1") %>%
+    str_replace_all("\\(step\\.min\\^\\{-1\\}\\)", "stepmin1") %>%
+    str_replace_all("[\\(\\)]", "") %>%
+    str_replace_all("__+", "_") %>%
+    str_replace_all("_$", "")
+}
+names(df) <- standardize_names(names(df))
 
 ## 3) Définir l'ordre des facteurs (comme ton MATLAB)
 surfaces <- c("Plat","Medium","High")
@@ -216,66 +940,15 @@ df <- df %>%
 
 ## 4) Liste des variables à tester (noms EXACTS des colonnes du CSV)
 variables_to_test <- c(
-  "Mean_Single support time (%)",
-  "Mean_ToeOff (%)",
-  "Mean_Double support time (%)",
-  "Mean_BaseOfSupport (cm)",
-  "Mean_StepWidth (cm)",
-  "Mean_Gait speed (m.s^{-1})",
-  "Mean_Stride length (m)",
-  "Mean_Stride time (s)",
-  "Mean_WalkRatio",
-  "Mean_StepTime_s",
-  "Mean_StanceTime_s",
-  "Mean_SwingTime_s",
-  "Mean_Norm WR (ua)",
-  "Mean_Cadence (step.min^{-1})",
-  "Mean_Norm Step length (ua)",
-  "Mean_Norm Cadence (ua)",
-  "Mean_Norm StepWidth (ua)",
-  "Mean_Norm Gait Speed (m.s^{-1})",
+  "Mean_Gait_speed_m.s^{_1}", "Mean_Norm_Gait_Speed_m.s^{_1}", "Mean_Step_length_m", "Mean_Stride_length_m",  "Mean_Norm_Step_length_ua", "Mean_WalkRatio", "Mean_Norm_WR_ua",
   
-  "CV_Single support time (%)",
-  "CV_Double support time (%)",
-  "CV_BaseOfSupport (cm)",
-  "CV_StepWidth (cm)",
-  "CV_Gait speed (m.s^{-1})",
-  "CV_Stride length (m)",
-  "CV_Stride time (s)",
-  "CV_WalkRatio",
-  "CV_Norm WR (ua)",
-  "CV_Cadence (step.min^{-1})",
-  "CV_Norm Step length (ua)",
-  "CV_Norm Cadence (ua)",
-  "CV_Norm StepWidth (ua)",
-  "CV_Norm Gait Speed (m.s^{-1})",
+  "Mean_Double_support_time_p", "Mean_Cadence_step.min^{_1}", "Mean_Norm_Cadence_ua", "Mean_COM_SPARC_Magnitude_ua", "Mean_StepTime_s", "Mean_StanceTime_s", "Mean_SwingTime_s",
   
-  "Mean_MoS AP HS (mm)",
-  "Mean_MoS ML HS (mm)",
-  "Mean_MoS AP Stance (mm)",
-  "Mean_MoS ML Stance (mm)",
-  "Mean_MoS AP HS (%L0)",
-  "Mean_MoS ML HS (%L0)",
-  "Mean_MoS AP Stance (%L0)",
-  "Mean_MoS ML Stance (%L0)",
+  "Mean_StepWidth_cm", "Mean_Norm_StepWidth_ua", "Mean_MoS_AP_HS_mm", "Mean_MoS_ML_HS_mm", "Mean_MoS_AP_Stance_mm", "Mean_MoS_ML_Stance_mm", "Mean_MoS_AP_HS_pL0", "Mean_MoS_ML_HS_pL0", "Mean_MoS_AP_Stance_pL0", "Mean_MoS_ML_Stance_pL0",
   
-  "Mean_COM SPARC Magnitude (ua)",
-  "Mean_COM LDLJ Magnitude (ua)",
-  "Mean_STERN SPARC Magnitude (ua)",
-  "Mean_STERN LDLJ Magnitude (ua)",
+  "Mean_GVI_ua", "CV_Norm_StepWidth_ua", "CV_Gait_speed_m.s^{_1}",
   
-  "SI_Stride time (s)",
-  "SI_Stride length (m)",
-  "SI_Double support time (%)",
-  "SI_Single support time (%)",
-  "SI_BaseOfSupport (cm)",
-  "SI_StepWidth (cm)",
-  "SI_WalkRatio",
-  "SI_Norm WR (ua)",
-  "SI_Cadence (step.min^{-1})",
-  "SI_Norm Step length (ua)",
-  "SI_Norm Cadence (ua)",
-  "SI_Norm StepWidth (ua)"
+  "SI_Stride_length_m", "SI_Double_support_time_p", "SI_Norm_StepWidth_ua"
 )
 
 ## 5) Fonction utilitaire: sécuriser les noms qui contiennent espaces et symboles
@@ -375,6 +1048,44 @@ apply_fdr <- function(tbl) {
 }
 
 anova_all_fdr <- apply_fdr(anova_all)
+
+# ----------------RECAP VARIABLES INFLUENCE PAR EFFETS FIXES -----------------
+
+# 1. Création du tableau de Maturation sans les NA
+maturation_final <- posthoc_age_within_surface %>%
+  filter(grepl("Adultes", contrast)) %>%
+  mutate(Groupe = str_remove(contrast, " - Adultes") %>% str_trim()) %>%
+  filter(p.value > 0.05) %>%
+  group_by(Variable, Surface) %>%
+  # On prend le groupe le plus jeune (ordre : JE -> Enfants -> Ados)
+  arrange(factor(Groupe, levels = c("JeunesEnfants", "Enfants", "Adolescents"))) %>%
+  slice(1) %>%
+  select(Variable, Surface, Groupe) %>%
+  pivot_wider(names_from = Surface, values_from = Groupe)
+
+# 2. Création des listes d'effets (p_fdr < 0.05)
+# On prépare un tableau simple avec deux colonnes : Effet et Variables
+listes_effets <- anova_all_fdr %>%
+  filter(p_fdr < 0.05) %>%
+  group_by(EffectFamily) %>%
+  summarise(Variables = paste(unique(Variable), collapse = ", ")) %>%
+  rename(Type_Effet = EffectFamily)
+
+# 3. Exportation vers un fichier Excel multi-onglets
+wb <- createWorkbook()
+
+addWorksheet(wb, "Maturation_Par_Surface")
+writeData(wb, "Maturation_Par_Surface", maturation_final)
+
+addWorksheet(wb, "Listes_Variables_Significatives")
+writeData(wb, "Listes_Variables_Significatives", listes_effets)
+
+# Sauvegarde sur ton bureau (ajuste le chemin si besoin)
+saveWorkbook(wb, "Synthese_Resultats_LMM.xlsx", overwrite = TRUE)
+
+message("Fichier 'Synthese_Resultats_LMM.xlsx' enregistré avec succès !")
+
+#-------------------------------------------------------------
 
 ## 9) Export Excel (pratique pour papier + traçabilité)
 out_dir <- file.path(dirname(csv_path), "R_LMM_Output")
