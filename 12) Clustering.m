@@ -28,7 +28,6 @@ domains.Pace = {
 domains.Rhythm = {
     'DoubleSupport',  'Double support time (%)',   'Mean';
     'NormCadence',    'Norm Cadence (ua)',         'Mean';
-    'ToeOff (%)',    'ToeOff (%)',         'Mean';
     'COM_SPARC_Magnitude','COM SPARC Magnitude (ua)', 'Mean'
 };
 
@@ -41,7 +40,7 @@ domains.PosturalControl = {
 domains.Asymmetry = {
     'distFoulee',     'Stride length (m)',         'SI';
     'DoubleSupport',  'Double support time (%)',   'SI';
-    'LargeurPas',     'Stride width (cm)',         'SI'
+    'Norm StepWidth (ua)',     'Norm StepWidth (ua)',         'SI'
 };
 
 domains.Variability = {

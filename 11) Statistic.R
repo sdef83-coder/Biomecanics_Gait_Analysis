@@ -22,6 +22,7 @@ library(stringr)
 library(gtsummary)
 library(gt)
 library(janitor)
+library(performance)
 
 chemin <- "C:/Users/silve/Desktop/DOCTORAT/UNIV MONTREAL/TRAVAUX-THESE/Surfaces_Irregulieres/Datas/Script/gaitAnalysisGUI/result/Statistical_Analysis_LMM"
 
@@ -34,7 +35,7 @@ df <- read.csv(
 ) %>%
   janitor::clean_names()
 
-# 1) Typage + facteurs (Correction "Jeunes Enfants" incluse)
+# 1) Typage + facteurs
 df <- df %>%
   mutate(
     participant = as.character(participant),
@@ -426,13 +427,15 @@ gtsave(gt_tbl, "Table_Descriptive_Gait_AgeGroup_Surface.pdf")
 
 # ---------------------------------------------------------
 # 14) Construction figures de l'ensemble des variables d'intérêt
+#     (Surface en abscisse)
 # ---------------------------------------------------------
 
 output_dir <- "Boxplots_Gait_Results"
 if (!dir.exists(output_dir)) dir.create(output_dir)
 
 generate_gait_boxplot <- function(var_name, data) {
-  # Récupérer le label "propre" via ta fonction existante
+  
+  # Label "propre" via ta fonction existante
   pretty_title <- make_pretty_label(var_name)
   
   # Préparation des données
@@ -441,52 +444,63 @@ generate_gait_boxplot <- function(var_name, data) {
     rename(Value = !!sym(var_name)) %>%
     mutate(
       Value = as.numeric(as.character(Value)),
-      AgeGroup = factor(AgeGroup, 
-                        levels = c("JeunesEnfants", "Enfants", "Adolescents", "Adultes"),
-                        labels = c("Young Children", "Children", "Adolescents", "Adults")),
-      Surface = factor(Surface, 
-                       levels = c("Plat", "Medium", "High"),
-                       labels = c("Even", "Medium", "High"))
+      AgeGroup = factor(
+        AgeGroup,
+        levels = c("JeunesEnfants", "Enfants", "Adolescents", "Adultes"),
+        labels = c("Young Children", "Children", "Adolescents", "Adults")
+      ),
+      Surface = factor(
+        Surface,
+        levels = c("Plat", "Medium", "High"),
+        labels = c("Even", "Medium", "High")
+      )
     ) %>%
     filter(!is.na(Value))
   
-  # Création du graphique
-  p <- ggplot(df_plot, aes(x = AgeGroup, y = Value, fill = Surface)) +
-    geom_boxplot(position = position_dodge(0.85), width = 0.7, 
-                 alpha = 0.7, outlier.shape = NA, color = "black") +
-    geom_jitter(aes(group = Surface),
-                position = position_dodge(0.85), 
-                size = 1.2, alpha = 0.3, color = "black") +
-    scale_fill_manual(values = c("Even" = "blue", "Medium" = "green", "High" = "red")) +
+  # Création du graphique : Surface en X, fill = AgeGroup
+  p <- ggplot(df_plot, aes(x = Surface, y = Value, fill = AgeGroup)) +
+    geom_boxplot(
+      position = position_dodge(0.85), width = 0.7,
+      alpha = 0.7, outlier.shape = NA, color = "black"
+    ) +
+    geom_jitter(
+      aes(group = AgeGroup),
+      position = position_dodge(0.85),
+      size = 1.2, alpha = 0.3, color = "black"
+    ) +
+    # Couleurs des âges (ajuste si tu veux une autre palette)
+    scale_fill_manual(values = c(
+      "Young Children" = "blue",
+      "Children"       = "orange",
+      "Adolescents"    = "green",
+      "Adults"         = "purple"
+    )) +
     labs(
-      title = paste(pretty_title, "across age groups and surfaces"),
+      title = paste(pretty_title, "across surfaces and age groups"),
       y = pretty_title,
-      x = "Age Group",
-      fill = "Surface"
+      x = "Surface",
+      fill = "Age Group"
     ) +
     theme_minimal() +
     theme(
       plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
-      axis.text.x = element_text(angle = 45, hjust = 1),
+      axis.text.x = element_text(angle = 0, hjust = 0.5),
       legend.position = "bottom",
       panel.grid.major.x = element_blank()
     )
   
   # Sauvegarde automatique
-  file_name <- paste0(output_dir, "/", var_name, ".png")
-  ggsave(file_name, plot = p, width = 8, height = 6, dpi = 300)
-  file_name2 <- paste0(output_dir, "/", var_name, ".pdf")
-  ggsave(file_name2, plot = p, width = 10, height = 8)
+  file_name_png <- file.path(output_dir, paste0(var_name, "_SurfaceX.png"))
+  ggsave(file_name_png, plot = p, width = 8, height = 6, dpi = 300)
+  
+  file_name_pdf <- file.path(output_dir, paste0(var_name, "_SurfaceX.pdf"))
+  ggsave(file_name_pdf, plot = p, width = 10, height = 8)
   
   return(p)
 }
 
-# Appliquer la fonction à chaque variable
-message("Génération des boxplots en cours...")
-
-# On utilise walk de purrr (inclus dans tidyverse) pour boucler sans afficher de sortie inutile
+message("Génération des boxplots (Surface en X) en cours...")
 walk(vars_present, ~generate_gait_boxplot(.x, df))
-
 message("Terminé ! Les graphiques sont dans le dossier : ", output_dir)
 
 
@@ -882,33 +896,35 @@ for (s in c("Plat", "Medium", "High")) {
 
 
 ## ============================================================
-## III. LMM Surface (répété) x AgeGroup (inter) + post-hocs emmeans
+## III. LMM & POST-HOCS SUR VARIABLES D'INTÉRÊT
+## ============================================================
+## Structure inspirée du script 14__VAS.R :
+## 1) ANOVA Type III
+## 2) Post-hocs : Effet GLOBAL de la Surface (toutes surfaces confondues)
+## 3) Post-hocs : Effet GLOBAL de l'Âge (tous âges confondus)
+## 4) Post-hocs : Effet de la Surface par Groupe d'Âge
+## 5) Post-hocs : Effet de l'Âge par Surface
 ## ============================================================
 
-## 0) Packages
-pkgs <- c("readr","dplyr","stringr","tibble","lme4","lmerTest","car","emmeans","purrr","openxlsx")
-to_install <- pkgs[!pkgs %in% rownames(installed.packages())]
-if(length(to_install) > 0) install.packages(to_install, dependencies = TRUE)
-
-library(readr)
-library(dplyr)
-library(tidyr)
-library(stringr)
-library(tibble)
+## 1) Chargement des packages nécessaires
 library(lme4)
-library(lmerTest)  # Satterthwaite df + p-values pour lmer
-library(car)       # Anova(type=3)
-library(emmeans)   # post-hocs
+library(lmerTest)
+library(emmeans)
+library(dplyr)
 library(purrr)
+library(tidyr)
+library(readr)
 library(openxlsx)
+library(stringr)
 
-## 1) Chemin vers ton CSV long
+## 2) Chargement et préparation des données
 csv_path <- "C:/Users/silve/Desktop/DOCTORAT/UNIV MONTREAL/TRAVAUX-THESE/Surfaces_Irregulieres/Datas/Script/gaitAnalysisGUI/result/Statistical_Analysis_LMM/Prepared_Data/ACP_Clustering_DATA.csv"
 
-## 2) Lire le CSV
-df <- read_delim(file = csv_path, delim = ";",show_col_types = FALSE)
+first_line <- readLines(csv_path, n = 1, warn = FALSE)
+delim <- ifelse(grepl(";", first_line), ";", ",")
+df <- read_delim(csv_path, delim = delim, show_col_types = FALSE)
 
-# On réutilise la même logique de nettoyage que dans la Partie II
+# Fonction de standardisation des noms (identique à la partie II)
 standardize_names <- function(x) {
   x %>%
     str_trim() %>%
@@ -927,7 +943,7 @@ standardize_names <- function(x) {
 }
 names(df) <- standardize_names(names(df))
 
-## 3) Définir l'ordre des facteurs (comme ton MATLAB)
+## 3) Définir l'ordre des facteurs
 surfaces <- c("Plat","Medium","High")
 groups   <- c("JeunesEnfants","Enfants","Adolescents","Adultes")
 
@@ -938,7 +954,7 @@ df <- df %>%
     AgeGroup    = factor(AgeGroup, levels = groups, ordered = TRUE)
   )
 
-## 4) Liste des variables à tester (noms EXACTS des colonnes du CSV)
+## 4) Liste des variables à tester
 variables_to_test <- c(
   "Mean_Gait_speed_m.s^{_1}", "Mean_Norm_Gait_Speed_m.s^{_1}", "Mean_Step_length_m", "Mean_Stride_length_m",  "Mean_Norm_Step_length_ua", "Mean_WalkRatio", "Mean_Norm_WR_ua",
   
@@ -951,16 +967,15 @@ variables_to_test <- c(
   "SI_Stride_length_m", "SI_Double_support_time_p", "SI_Norm_StepWidth_ua"
 )
 
-## 5) Fonction utilitaire: sécuriser les noms qui contiennent espaces et symboles
-bt <- function(x) paste0("`", x, "`")  # backticks
-
-## 6) Fonction pour fitter un LMM + ANOVA type III + post-hocs
+## 5) Fonction pour fitter un LMM + ANOVA type III + 4 TYPES DE POST-HOCS
 fit_one_variable <- function(var_name, data, p_adjust = "holm") {
   
   if(!var_name %in% names(data)) {
     return(list(
       anova = tibble::tibble(Variable = var_name, Effect = NA, df1 = NA, df2 = NA, F = NA, p = NA,
                              Note = "Variable absente du CSV"),
+      ph_surface_global = NULL,
+      ph_age_global = NULL,
       ph_surface_within_age = NULL,
       ph_age_within_surface = NULL
     ))
@@ -974,14 +989,11 @@ fit_one_variable <- function(var_name, data, p_adjust = "holm") {
   
   m <- lmerTest::lmer(fml, data = d, REML = TRUE)
   
-  ## ANOVA Type III
+  ## ============================================================
+  ## A) ANOVA Type III
+  ## ============================================================
   a <- as.data.frame(stats::anova(m, type = 3, ddf = "Satterthwaite"))
-  
-  # Afficher les noms de colonnes pour débugger (à retirer après)
-  # print(paste("Colonnes ANOVA pour", var_name, ":", paste(names(a), collapse = ", ")))
-  
-  a <- a %>%
-    tibble::rownames_to_column("Effect")
+  a <- a %>% tibble::rownames_to_column("Effect")
   
   ## Normalisation robuste des noms de colonnes
   a_df <- a %>%
@@ -1004,36 +1016,73 @@ fit_one_variable <- function(var_name, data, p_adjust = "holm") {
     ) %>%
     dplyr::select(Variable, Effect, df1, df2, F, p)
   
-  ## Post-hocs
-  ## Post-hocs
+  ## ============================================================
+  ## B) Post-hocs : Effet GLOBAL de la Surface (toutes surfaces confondues)
+  ## ============================================================
+  em_surface_global <- emmeans::emmeans(m, ~ Surface)
+  ph_surf_global <- as.data.frame(pairs(em_surface_global, adjust = p_adjust)) %>%
+    dplyr::mutate(Variable = var_name, Analysis = "Global Surface") %>%
+    dplyr::relocate(Variable, Analysis)
+  
+  ## ============================================================
+  ## C) Post-hocs : Effet GLOBAL de l'Âge (tous âges confondus)
+  ## ============================================================
+  em_age_global <- emmeans::emmeans(m, ~ AgeGroup)
+  ph_age_global <- as.data.frame(pairs(em_age_global, adjust = p_adjust)) %>%
+    dplyr::mutate(Variable = var_name, Analysis = "Global AgeGroup") %>%
+    dplyr::relocate(Variable, Analysis)
+  
+  ## ============================================================
+  ## D) Post-hocs : Effet de la Surface par Groupe d'Âge
+  ## ============================================================
   em_surf_by_age <- emmeans::emmeans(m, ~ Surface | AgeGroup)
   ph1 <- as.data.frame(pairs(em_surf_by_age, adjust = p_adjust)) %>%
-    dplyr::mutate(Variable = var_name, ContrastFamily = "Surface within AgeGroup") %>%
-    dplyr::relocate(Variable, ContrastFamily)
+    dplyr::mutate(Variable = var_name, Analysis = "Surface within AgeGroup") %>%
+    dplyr::relocate(Variable, Analysis)
   
+  ## ============================================================
+  ## E) Post-hocs : Effet de l'Âge par Surface
+  ## ============================================================
   em_age_by_surf <- emmeans::emmeans(m, ~ AgeGroup | Surface)
   ph2 <- as.data.frame(pairs(em_age_by_surf, adjust = p_adjust)) %>%
-    dplyr::mutate(Variable = var_name, ContrastFamily = "AgeGroup within Surface") %>%
-    dplyr::relocate(Variable, ContrastFamily)
+    dplyr::mutate(Variable = var_name, Analysis = "AgeGroup within Surface") %>%
+    dplyr::relocate(Variable, Analysis)
+  
+  ## ============================================================
+  ## F) Calcul des R² (Nakagawa)
+  ## ============================================================
+  r2_vals <- performance::r2_nakagawa(m)
   
   list(
     model = m,
     anova = a_df,
+    ph_surface_global = ph_surf_global,
+    ph_age_global = ph_age_global,
     ph_surface_within_age = ph1,
-    ph_age_within_surface = ph2
+    ph_age_within_surface = ph2,
+    r2 = tibble::tibble(
+      Variable = var_name,
+      R2_Marginal = r2_vals$R2_marginal,
+      R2_Conditional = r2_vals$R2_conditional
+    )
   )
 }
 
-## 7) Lancer sur toutes les variables
+## 6) Lancer sur toutes les variables
+message("Analyse en cours pour ", length(variables_to_test), " variables...")
 results <- map(variables_to_test, fit_one_variable, data = df, p_adjust = "holm")
 
+## 7) Extraire les résultats
 anova_all <- bind_rows(map(results, "anova"))
 
+posthoc_surface_global <- bind_rows(compact(map(results, "ph_surface_global")))
+posthoc_age_global <- bind_rows(compact(map(results, "ph_age_global")))
 posthoc_surface_within_age <- bind_rows(compact(map(results, "ph_surface_within_age")))
 posthoc_age_within_surface <- bind_rows(compact(map(results, "ph_age_within_surface")))
 
-## 8) (Option) FDR par “famille d’effets” sur les p des effets fixes (comme ton MATLAB)
-## Familles: Surface / AgeGroup / Surface:AgeGroup
+r2_all <- bind_rows(compact(map(results, "r2")))
+
+## 8) Appliquer FDR par famille d'effets
 apply_fdr <- function(tbl) {
   tbl %>%
     filter(Effect %in% c("Surface","AgeGroup","Surface:AgeGroup")) %>%
@@ -1049,70 +1098,99 @@ apply_fdr <- function(tbl) {
 
 anova_all_fdr <- apply_fdr(anova_all)
 
-# ----------------RECAP VARIABLES INFLUENCE PAR EFFETS FIXES -----------------
+## ============================================================
+## 9) RÉCAPITULATIF POUR LA DISCUSSION
+## ============================================================
 
-# 1. Création du tableau de Maturation sans les NA
+# A) Variables influencées par chaque effet (p_fdr < 0.05)
+listes_effets <- anova_all_fdr %>%
+  filter(p_fdr < 0.05) %>%
+  group_by(EffectFamily) %>%
+  summarise(
+    Nombre_Variables = n(),
+    Variables = paste(unique(Variable), collapse = " | ")
+  ) %>%
+  rename(Type_Effet = EffectFamily)
+
+# B) Tableau de maturation par surface
 maturation_final <- posthoc_age_within_surface %>%
   filter(grepl("Adultes", contrast)) %>%
   mutate(Groupe = str_remove(contrast, " - Adultes") %>% str_trim()) %>%
   filter(p.value > 0.05) %>%
   group_by(Variable, Surface) %>%
-  # On prend le groupe le plus jeune (ordre : JE -> Enfants -> Ados)
   arrange(factor(Groupe, levels = c("JeunesEnfants", "Enfants", "Adolescents"))) %>%
   slice(1) %>%
   select(Variable, Surface, Groupe) %>%
   pivot_wider(names_from = Surface, values_from = Groupe)
 
-# 2. Création des listes d'effets (p_fdr < 0.05)
-# On prépare un tableau simple avec deux colonnes : Effet et Variables
-listes_effets <- anova_all_fdr %>%
-  filter(p_fdr < 0.05) %>%
-  group_by(EffectFamily) %>%
-  summarise(Variables = paste(unique(Variable), collapse = ", ")) %>%
-  rename(Type_Effet = EffectFamily)
-
-# 3. Exportation vers un fichier Excel multi-onglets
-wb <- createWorkbook()
-
-addWorksheet(wb, "Maturation_Par_Surface")
-writeData(wb, "Maturation_Par_Surface", maturation_final)
-
-addWorksheet(wb, "Listes_Variables_Significatives")
-writeData(wb, "Listes_Variables_Significatives", listes_effets)
-
-# Sauvegarde sur ton bureau (ajuste le chemin si besoin)
-saveWorkbook(wb, "Synthese_Resultats_LMM.xlsx", overwrite = TRUE)
-
-message("Fichier 'Synthese_Resultats_LMM.xlsx' enregistré avec succès !")
-
-#-------------------------------------------------------------
-
-## 9) Export Excel (pratique pour papier + traçabilité)
+## ============================================================
+## 10) EXPORT DES RÉSULTATS
+## ============================================================
 out_dir <- file.path(dirname(csv_path), "R_LMM_Output")
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
 
-xlsx_path <- file.path(out_dir, "LMM_ANOVA_and_Posthocs.xlsx")
+# A) Fichier Excel multi-onglets PRINCIPAL
+xlsx_path <- file.path(out_dir, "LMM_ANOVA_and_Posthocs_COMPLET.xlsx")
 wb <- createWorkbook()
 
-addWorksheet(wb, "ANOVA_TypeIII")
-writeData(wb, "ANOVA_TypeIII", anova_all_fdr)
+# Onglet 1 : ANOVA Type III avec FDR
+addWorksheet(wb, "ANOVA_TypeIII_FDR")
+writeData(wb, "ANOVA_TypeIII_FDR", anova_all_fdr)
 
+# Onglet 2 : R² (Marginal et Conditionnel)
+addWorksheet(wb, "R2_Effect_Sizes")
+writeData(wb, "R2_Effect_Sizes", r2_all)
+
+# Onglet 3 : Post-hocs GLOBAL Surface
+addWorksheet(wb, "Posthoc_Surface_Global")
+writeData(wb, "Posthoc_Surface_Global", posthoc_surface_global)
+
+# Onglet 4 : Post-hocs GLOBAL Âge
+addWorksheet(wb, "Posthoc_Age_Global")
+writeData(wb, "Posthoc_Age_Global", posthoc_age_global)
+
+# Onglet 5 : Post-hocs Surface par Âge
 addWorksheet(wb, "Posthoc_Surface_by_Age")
 writeData(wb, "Posthoc_Surface_by_Age", posthoc_surface_within_age)
 
+# Onglet 6 : Post-hocs Âge par Surface
 addWorksheet(wb, "Posthoc_Age_by_Surface")
 writeData(wb, "Posthoc_Age_by_Surface", posthoc_age_within_surface)
 
 saveWorkbook(wb, xlsx_path, overwrite = TRUE)
 
-## 10) Export CSV (si tu veux aussi)
+# B) Fichier Excel SYNTHÈSE pour la discussion
+xlsx_synthese <- file.path(out_dir, "Synthese_Resultats_LMM_Discussion.xlsx")
+wb_synth <- createWorkbook()
+
+addWorksheet(wb_synth, "Liste_Effets_Significatifs")
+writeData(wb_synth, "Liste_Effets_Significatifs", listes_effets)
+
+addWorksheet(wb_synth, "Maturation_Par_Surface")
+writeData(wb_synth, "Maturation_Par_Surface", maturation_final)
+
+saveWorkbook(wb_synth, xlsx_synthese, overwrite = TRUE)
+
+# C) Export CSV (optionnel)
 write_csv(anova_all_fdr, file.path(out_dir, "ANOVA_TypeIII_with_FDR.csv"))
+write_csv(r2_all, file.path(out_dir, "R2_Effect_Sizes.csv"))
+write_csv(posthoc_surface_global, file.path(out_dir, "Posthoc_Surface_GLOBAL_Holm.csv"))
+write_csv(posthoc_age_global, file.path(out_dir, "Posthoc_Age_GLOBAL_Holm.csv"))
 write_csv(posthoc_surface_within_age, file.path(out_dir, "Posthoc_Surface_within_AgeGroup_Holm.csv"))
 write_csv(posthoc_age_within_surface, file.path(out_dir, "Posthoc_AgeGroup_within_Surface_Holm.csv"))
 
-## 11) Petit recap console (facultatif)
-message("=== Terminé ===")
+## ============================================================
+## 11) RÉCAPITULATIF CONSOLE
+## ============================================================
+message("\n=== ANALYSE TERMINÉE ===")
 message("ANOVA Type III + FDR: ", nrow(anova_all_fdr), " lignes")
-message("Posthoc Surface|AgeGroup: ", nrow(posthoc_surface_within_age), " comparaisons")
-message("Posthoc AgeGroup|Surface: ", nrow(posthoc_age_within_surface), " comparaisons")
-message("Fichier Excel: ", xlsx_path)
+message("R² (Nakagawa) calculés pour: ", nrow(r2_all), " variables")
+message("\n--- POST-HOCS (4 analyses distinctes) ---")
+message("1) Effet GLOBAL Surface: ", nrow(posthoc_surface_global), " comparaisons")
+message("2) Effet GLOBAL Âge: ", nrow(posthoc_age_global), " comparaisons")
+message("3) Surface par Âge: ", nrow(posthoc_surface_within_age), " comparaisons")
+message("4) Âge par Surface: ", nrow(posthoc_age_within_surface), " comparaisons")
+message("\n--- FICHIERS EXPORTÉS ---")
+message("Fichier COMPLET: ", xlsx_path)
+message("Fichier SYNTHÈSE: ", xlsx_synthese)
+message("\n✓ Prêt pour la rédaction de la discussion !")

@@ -505,3 +505,380 @@ ggsave("Migration_Alluvial_Final.pdf",
        units = "cm") # Pas besoin de DPI pour le PDF car c'est du vectoriel
 
 print("Les images ont été enregistrées dans votre dossier de travail.")
+
+
+
+
+# ___________________________________________________________________________
+# III - RADAR PLOT DES CLUSTERS (TOUTES SURFACES CONFONDUES)
+# ___________________________________________________________________________
+
+# --- 1. PRÉPARATION DES VARIABLES ET DOMAINES ---
+
+# Variables présentes dans votre CSV (après standardisation des noms)
+# Note : on utilise les noms EXACTS tels qu'ils apparaissent dans votre CSV
+vars_radar <- c(
+  "Mean_Norm Gait Speed (m.s^{-1})",
+  "Mean_Norm Step length (ua)",
+  "Mean_Norm WR (ua)",
+  "Mean_Double support time (%)",
+  "Mean_Norm Cadence (ua)",
+  "Mean_COM SPARC Magnitude (ua)",
+  "Mean_Norm StepWidth (ua)",
+  "Mean_MoS ML HS (%L0)",
+  "Mean_MoS AP HS (%L0)",
+  "SI_Stride length (m)",
+  "SI_Double support time (%)",
+  "SI_StepWidth (cm)",
+  "CV_Norm StepWidth (ua)",
+  "Mean_GVI (ua)",
+  "CV_Gait speed (m.s^{-1})"
+)
+
+# Vérification que toutes les variables sont présentes
+vars_radar_present <- intersect(vars_radar, names(df))
+if(length(vars_radar_present) < length(vars_radar)) {
+  message("Variables manquantes : ", paste(setdiff(vars_radar, vars_radar_present), collapse = ", "))
+}
+
+# Labels lisibles pour l'affichage
+radar_labels <- c(
+  "Norm Gait Speed (ua)",
+  "Norm Step length (ua)",
+  "Norm WR (ua)",
+  "Double support time (%)",
+  "Norm Cadence (ua)",
+  "COM SPARC (ua)",
+  "Norm StepWidth (ua)",
+  "MoS ML HS (%L0)",
+  "MoS AP HS (%L0)",
+  "S.I. Stride length",
+  "S.I. Double support",
+  "S.I. StepWidth",
+  "C.V. StepWidth (%)",
+  "GVI (ua)",
+  "C.V. Gait speed (%)"
+)
+
+# --- 2. DÉFINITION DES DOMAINES ---
+domains_vars <- list(
+  PACE = c(
+    "Mean_Norm Gait Speed (m.s^{-1})",
+    "Mean_Norm Step length (ua)",
+    "Mean_Norm WR (ua)"
+  ),
+  RHYTHM = c(
+    "Mean_Double support time (%)",
+    "Mean_Norm Cadence (ua)",
+    "Mean_COM SPARC Magnitude (ua)"
+  ),
+  `POSTURAL CONTROL` = c(
+    "Mean_Norm StepWidth (ua)",
+    "Mean_MoS ML HS (%L0)",
+    "Mean_MoS AP HS (%L0)"
+  ),
+  ASYMMETRY = c(
+    "SI_Stride length (m)",
+    "SI_Double support time (%)",
+    "SI_StepWidth (cm)"
+  ),
+  VARIABILITY = c(
+    "CV_Norm StepWidth (ua)",
+    "Mean_GVI (ua)",
+    "CV_Gait speed (m.s^{-1})"
+  )
+)
+
+# Couleurs des domaines
+domain_colors <- c(
+  PACE = "lightblue",
+  RHYTHM = "lightcoral",
+  `POSTURAL CONTROL` = "palegreen",
+  ASYMMETRY = "plum",
+  VARIABILITY = "lightyellow"
+)
+
+# Couleurs des clusters
+cluster_colors <- c("1" = "blue", "2" = "red")  # Bleu et Rouge
+
+# --- 3. FONCTION UTILITAIRE : ASSOCIER CHAQUE VARIABLE À SON DOMAINE ---
+get_domain_for_vars <- function(vars_in_radar, domains_list) {
+  dom_vec <- rep(NA_character_, length(vars_in_radar))
+  names(dom_vec) <- vars_in_radar
+  for (d in names(domains_list)) {
+    dom_vec[vars_in_radar %in% domains_list[[d]]] <- d
+  }
+  dom_vec
+}
+
+# --- 4. FONCTION : DESSINER LES FONDS COLORÉS PAR DOMAINE ---
+draw_domain_background <- function(domains_by_var, domain_cols, alpha = 0.18, r = 1) {
+  n <- length(domains_by_var)
+  if (n < 3) return(invisible(NULL))
+  
+  # Angles des axes (radar classique: premier en haut)
+  angles <- seq(0, 2*pi, length.out = n + 1)[1:n] + (pi/2)
+  
+  # Limites entre axes = milieux angulaires
+  bounds <- angles - (pi / n)
+  bounds <- c(bounds, bounds[1] + 2*pi)
+  
+  # Regrouper les variables contiguës d'un même domaine
+  runs <- rle(domains_by_var)
+  idx_end <- cumsum(runs$lengths)
+  idx_start <- c(1, head(idx_end, -1) + 1)
+  
+  for (k in seq_along(runs$values)) {
+    dom <- runs$values[k]
+    if (is.na(dom)) next
+    col <- domain_cols[[dom]]
+    if (is.null(col) || is.na(col)) next
+    
+    i1 <- idx_start[k]
+    i2 <- idx_end[k]
+    
+    # Bornes angulaires du bloc contigu
+    a_start <- bounds[i1]
+    a_end   <- bounds[i2 + 1]
+    
+    # Points du secteur
+    aa <- seq(a_start, a_end, length.out = 80)
+    x <- c(0, r * cos(aa), 0)
+    y <- c(0, r * sin(aa), 0)
+    
+    polygon(
+      x, y,
+      col = grDevices::adjustcolor(col, alpha.f = alpha),
+      border = NA
+    )
+  }
+  
+  invisible(NULL)
+}
+
+# --- 5. CALCUL DES BORNES MIN/MAX GLOBALES (NORMALISATION) ---
+radar_min_max <- df %>%
+  dplyr::select(dplyr::all_of(vars_radar_present)) %>%
+  dplyr::summarise(dplyr::across(
+    dplyr::everything(),
+    list(
+      min = ~min(.x, na.rm = TRUE),
+      max = ~max(.x, na.rm = TRUE)
+    )
+  ))
+
+mins_raw <- radar_min_max %>% dplyr::select(dplyr::ends_with("_min")) %>% unlist() %>% as.numeric()
+maxs_raw <- radar_min_max %>% dplyr::select(dplyr::ends_with("_max")) %>% unlist() %>% as.numeric()
+
+# --- 6. FONCTION PRINCIPALE : CRÉER LE RADAR PLOT ---
+create_cluster_radar <- function(df_full, vars, labels) {
+  
+  # A) Calcul des MÉDIANES par cluster (toutes surfaces confondues)
+  data_median <- df_full %>%
+    dplyr::group_by(ClusterID) %>%
+    dplyr::summarise(dplyr::across(dplyr::all_of(vars), ~median(.x, na.rm = TRUE)), .groups = "drop") %>%
+    dplyr::arrange(ClusterID)
+  
+  # B) Extraction des données individuelles (toutes surfaces confondues)
+  data_indiv <- df_full %>%
+    dplyr::select(ClusterID, dplyr::all_of(vars))
+  
+  # C) Récupération des min/max globaux (pour normalisation)
+  mins <- as.vector(radar_min_max[grep("_min$", names(radar_min_max))])
+  maxs <- as.vector(radar_min_max[grep("_max$", names(radar_min_max))])
+  
+  # D) Normalisation des médianes (0–1)
+  radar_df_median <- as.data.frame(data_median[, -1, drop = FALSE])
+  
+  normalized_median <- as.data.frame(lapply(seq_len(ncol(radar_df_median)), function(i) {
+    denom <- (maxs[[i]] - mins[[i]])
+    if (is.na(denom) || denom == 0) return(rep(0, nrow(radar_df_median)))
+    (radar_df_median[, i] - mins[[i]]) / denom
+  }))
+  
+  colnames(normalized_median) <- labels
+  
+  # Format attendu par fmsb::radarchart :
+  # - 1ère ligne : max (=1)
+  # - 2ème ligne : min (=0)
+  # - lignes suivantes : données (ici = médianes par cluster)
+  final_radar_median <- rbind(rep(1, length(vars)), rep(0, length(vars)), normalized_median)
+  
+  # E) Normalisation des individus (0–1)
+  radar_df_indiv <- data_indiv[, -1, drop = FALSE]
+  
+  normalized_indiv <- as.data.frame(lapply(seq_len(ncol(radar_df_indiv)), function(i) {
+    denom <- (maxs[[i]] - mins[[i]])
+    if (is.na(denom) || denom == 0) return(rep(0, nrow(radar_df_indiv)))
+    (radar_df_indiv[, i] - mins[[i]]) / denom
+  }))
+  
+  colnames(normalized_indiv) <- labels
+  
+  # F) Couleurs : clusters
+  colors_border_median <- cluster_colors[as.character(data_median$ClusterID)]
+  colors_in_median <- grDevices::adjustcolor(colors_border_median, alpha.f = 0.20)
+  
+  # G) Tracé en 3 couches (du fond vers l'avant)
+  # 1) Cadre (axes, grille, titre) avec polygones invisibles
+  # 2) Fonds colorés par domaine
+  # 3) Individus (gris, derrière)
+  # 4) Médianes de cluster (couleur, devant)
+  
+  # =========================
+  # G1) Cadre du radar
+  # =========================
+  
+  ng <- nrow(data_median)
+  transparent <- grDevices::adjustcolor("white", alpha.f = 0)
+  
+  fmsb::radarchart(
+    final_radar_median,
+    axistype = 0,
+    seg = 4,
+    pcol  = rep(transparent, ng),
+    pfcol = rep(transparent, ng),
+    plwd  = rep(0.01, ng),
+    plty  = rep(1, ng),
+    cglcol = "grey70", 
+    cglty = 1, 
+    cglwd = 0.8,
+    vlcex = 0.7,
+    title = "Gait Profile Comparison Between Clusters (All Surfaces)"
+  )
+  
+  # === Préparation des variables pour les étiquettes ===
+  nvar <- length(vars)
+  angles <- seq(0, 2*pi, length.out = nvar + 1)[1:nvar] + (pi/2)
+  
+  pct <- c(0.25, 0.50, 0.75, 1.00)
+  r_levels <- pct
+  
+  ticks_real <- sapply(seq_len(nvar), function(i) {
+    mins[[i]] + pct * (maxs[[i]] - mins[[i]])
+  })
+  
+  # =========================
+  # G2) Fond coloré par domaine
+  # =========================
+  domains_by_var <- get_domain_for_vars(vars, domains_vars)
+  
+  par(new = TRUE)  # superpose sur le même repère
+  draw_domain_background(
+    domains_by_var = domains_by_var,
+    domain_cols    = domain_colors,
+    alpha          = 0.35,
+    r              = 1
+  )
+  
+  # === Affichage des étiquettes de valeurs réelles ===
+  for (i in seq_len(nvar)) {
+    angle <- angles[i]
+    
+    for (j in seq_along(pct)) {
+      r <- r_levels[j]
+      
+      # Position du texte (légèrement décalé vers l'extérieur)
+      x_pos <- r * cos(angle) * 1.05
+      y_pos <- r * sin(angle) * 1.05
+      
+      # Valeur réelle
+      val <- round(ticks_real[j, i], 2)
+      
+      # Afficher le texte
+      text(
+        x = x_pos,
+        y = y_pos,
+        labels = val,
+        cex = 0.5,
+        col = "grey20",
+        font = 1
+      )
+    }
+  }
+  
+  # =========================
+  # G3) Individus : tracés en gris derrière
+  # =========================
+  indiv_col <- grDevices::adjustcolor("grey30", alpha.f = 0.10)
+  
+  for (i in seq_len(nrow(normalized_indiv))) {
+    par(new = TRUE)
+    fmsb::radarchart(
+      rbind(rep(1, length(vars)), rep(0, length(vars)), normalized_indiv[i, , drop = FALSE]),
+      axistype = 0,
+      vlabels = rep("", length(vars)),
+      pcol = indiv_col,
+      pfcol = NA,
+      plwd = 0.7,
+      plty = 1,
+      cglcol = NA,
+      axislabcol = NA,
+      vlcex = 0,
+      seg = length(vars)
+    )
+  }
+  
+  # =========================
+  # G4) Médianes : tracés colorés au premier plan
+  # =========================
+  par(new = TRUE)
+  fmsb::radarchart(
+    final_radar_median,
+    axistype = 0,
+    vlabels = rep("", length(vars)),
+    pcol = colors_border_median,
+    pfcol = colors_in_median,
+    plwd = 3.5,
+    plty = 1,
+    cglcol = NA,
+    axislabcol = NA,
+    vlcex = 0,
+    seg = length(vars)
+  )
+  
+  # --- Légende
+  legend(
+    x = "bottom",
+    legend = c("Cluster 1", "Cluster 2"),
+    inset = -0.15,
+    horiz = TRUE,
+    bty = "n",
+    pch = 20,
+    col = cluster_colors,
+    text.col = "black",
+    cex = 0.8,
+    pt.cex = 1.5,
+    xpd = TRUE
+  )
+}
+
+# --- 7. GÉNÉRATION DES RADAR PLOTS ---
+
+# 7.1) Export PDF
+pdf("Radar_Plot_Clusters.pdf", width = 12, height = 12)
+par(mfrow = c(1, 1))
+
+create_cluster_radar(df, vars_radar_present, radar_labels)
+
+dev.off()
+
+# 7.2) Export PNG haute qualité
+png(filename = "Radar_Plot_Clusters.png", width = 5200, height = 5200, res = 600, type = "cairo")
+
+op <- par(no.readonly = TRUE)
+
+par(mfrow = c(1, 1))
+par(mar = c(8, 5, 5, 5))     # bottom, left, top, right
+par(oma = c(0, 0, 0, 0))
+par(xaxs = "i", yaxs = "i")
+par(xpd = NA)
+par(cex = 0.85)
+
+create_cluster_radar(df, vars_radar_present, radar_labels)
+
+par(op)
+dev.off()
+
+message("Radar plot des clusters généré avec succès !")
+message("Fichiers créés : Radar_Plot_Clusters.pdf et Radar_Plot_Clusters.png")

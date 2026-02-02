@@ -24,6 +24,7 @@ variables_to_test = {
     % --- Paramètres spatio-temporelles ---
     'Mean_Single support time (%)'
     'Mean_ToeOff (%)'
+    'Mean_Step length (m)'
     'Mean_Double support time (%)'
     'Mean_BaseOfSupport (cm)'
     'Mean_StepWidth (cm)'
@@ -41,6 +42,7 @@ variables_to_test = {
     % --- Variabilité ---
     'CV_Single support time (%)'
     'CV_ToeOff (%)'
+    'CV_Step length (m)'
     'CV_Double support time (%)'
     'CV_BaseOfSupport (cm)'
     'CV_StepWidth (cm)'
@@ -77,6 +79,7 @@ variables_to_test = {
     % --- Indices de symétrie ---
     'SI_Stride time (s)'
     'SI_Stride length (m)'
+    'SI_Step length (m)'
     'SI_Double support time (%)'
     'SI_Single support time (%)'
     'SI_BaseOfSupport (cm)'
