@@ -180,11 +180,11 @@ names(df) <- standardize_names(names(df))
 variables_interet <- c(
   "NCycles_Left", "NCycles_Right",
   
-  "Mean_Gait_speed_m.s^{_1}", "Mean_Norm_Gait_Speed_m.s^{_1}", "Mean_Step_length_m", "Mean_Stride_length_m",  "Mean_Norm_Step_length_ua", "Mean_WalkRatio", "Mean_Norm_WR_ua",
+  "Mean_Gait_speed_m.s^{_1}", "Mean_Norm_Gait_Speed_m.s^{_1}", "Mean_Step_length_m", "Mean_Stride_length_m",  "Mean_Norm_Step_length_ua", "Mean_WalkRatio", "Mean_Norm_WR_ua", "Mean_Stride_time_s", "Mean_StepTime_s",
   
   "Mean_Double_support_time_p", "Mean_Cadence_step.min^{_1}", "Mean_Norm_Cadence_ua", "Mean_COM_SPARC_Magnitude_ua", "Mean_StepTime_s", "Mean_StanceTime_s", "Mean_SwingTime_s",
   
-  "Mean_StepWidth_cm", "Mean_Norm_StepWidth_ua", "Mean_MoS_AP_HS_mm", "Mean_MoS_ML_HS_mm", "Mean_MoS_AP_Stance_mm", "Mean_MoS_ML_Stance_mm", "Mean_MoS_AP_HS_pL0", "Mean_MoS_ML_HS_pL0", "Mean_MoS_AP_Stance_pL0", "Mean_MoS_ML_Stance_pL0",
+  "Mean_StepWidth_cm", "Mean_Norm_StepWidth_ua", "Mean_MoS_AP_HS_mm", "Mean_MoS_ML_HS_mm", "Mean_MoS_AP_Stance_mm", "Mean_MoS_ML_Stance_mm", "Mean_MoS_AP_HS_pL0", "Mean_MoS_ML_HS_pL0", "Mean_MoS_AP_Stance_pL0", "Mean_MoS_ML_Stance_pL0", "Mean_StanceTime_s", "Mean_Single_support_time_p", "Mean_SwingTime_s",
   
   "Mean_GVI_ua", "CV_Norm_StepWidth_ua", "CV_Gait_speed_m.s^{_1}",
   
@@ -511,12 +511,12 @@ message("Terminé ! Les graphiques sont dans le dossier : ", output_dir)
 # 15.1) Définition des variables incluses dans le radar
 vars_radar <- c(
   "Mean_Gait_speed_m.s^{_1}", "Mean_Norm_Gait_Speed_m.s^{_1}", "Mean_Step_length_m",
-  "Mean_Stride_length_m", "Mean_Norm_Step_length_ua", "Mean_WalkRatio", "Mean_Norm_WR_ua",
-  "Mean_Double_support_time_p", "Mean_Cadence_step.min^{_1}", "Mean_Norm_Cadence_ua",
+  "Mean_Norm_Step_length_ua", "Mean_Stride_length_m", "Mean_WalkRatio", "Mean_Norm_WR_ua",
+  "Mean_Double_support_time_p", "Mean_Single_support_time_p", "Mean_StanceTime_s", "Mean_SwingTime_s", "Mean_StepTime_s", "Mean_Stride_time_s","Mean_Cadence_step.min^{_1}", "Mean_Norm_Cadence_ua",
   "Mean_COM_SPARC_Magnitude_ua", "Mean_StepWidth_cm", "Mean_Norm_StepWidth_ua",
   "Mean_MoS_AP_HS_pL0", "Mean_MoS_ML_HS_pL0", "Mean_MoS_AP_HS_mm", "Mean_MoS_ML_HS_mm", "Mean_GVI_ua",
   "CV_Norm_StepWidth_ua", "CV_Gait_speed_m.s^{_1}", "SI_Stride_length_m",
-  "SI_Double_support_time_p", "SI_Norm_StepWidth_ua"
+  "SI_Double_support_time_p", "SI_StepWidth_cm"
 )
 
 # 15.2) Vérification des variables présentes et préparation des labels
@@ -541,12 +541,15 @@ age_colors <- c(
 domains_vars <- list(
   PACE = c(
     "Mean_Gait_speed_m.s^{_1}", "Mean_Norm_Gait_Speed_m.s^{_1}",
-    "Mean_Step_length_m", "Mean_Stride_length_m",
-    "Mean_Norm_Step_length_ua", "Mean_WalkRatio", "Mean_Norm_WR_ua"
+    "Mean_Step_length_m","Mean_Norm_Step_length_ua", "Mean_Stride_length_m", 
+    "Mean_WalkRatio", "Mean_Norm_WR_ua"
   ),
   RHYTHM = c(
-    "Mean_Double_support_time_p", "Mean_Cadence_step.min^{_1}",
-    "Mean_Norm_Cadence_ua", "Mean_COM_SPARC_Magnitude_ua"
+    "Mean_Double_support_time_p", "Mean_Single_support_time_p", 
+    "Mean_StanceTime_s", "Mean_SwingTime_s",
+    "Mean_StepTime_s", "Mean_Stride_time_s",
+    "Mean_Cadence_step.min^{_1}", "Mean_Norm_Cadence_ua", 
+    "Mean_COM_SPARC_Magnitude_ua"
   ),
   `POSTURAL CONTROL` = c(
     "Mean_StepWidth_cm", "Mean_Norm_StepWidth_ua",
@@ -554,7 +557,7 @@ domains_vars <- list(
     "Mean_MoS_AP_HS_mm", "Mean_MoS_ML_HS_mm"
   ),
   ASYMMETRY = c(
-    "SI_Stride_length_m", "SI_Double_support_time_p", "SI_Norm_StepWidth_ua"
+    "SI_Stride_length_m", "SI_Double_support_time_p", "SI_StepWidth_cm"
   ),
   VARIABILITY = c(
     "Mean_GVI_ua", "CV_Norm_StepWidth_ua", "CV_Gait_speed_m.s^{_1}"
@@ -898,7 +901,6 @@ for (s in c("Plat", "Medium", "High")) {
 ## ============================================================
 ## III. LMM & POST-HOCS SUR VARIABLES D'INTÉRÊT
 ## ============================================================
-## Structure inspirée du script 14__VAS.R :
 ## 1) ANOVA Type III
 ## 2) Post-hocs : Effet GLOBAL de la Surface (toutes surfaces confondues)
 ## 3) Post-hocs : Effet GLOBAL de l'Âge (tous âges confondus)
@@ -956,11 +958,11 @@ df <- df %>%
 
 ## 4) Liste des variables à tester
 variables_to_test <- c(
-  "Mean_Gait_speed_m.s^{_1}", "Mean_Norm_Gait_Speed_m.s^{_1}", "Mean_Step_length_m", "Mean_Stride_length_m",  "Mean_Norm_Step_length_ua", "Mean_WalkRatio", "Mean_Norm_WR_ua",
+  "Mean_Gait_speed_m.s^{_1}", "Mean_Norm_Gait_Speed_m.s^{_1}", "Mean_Step_length_m", "Mean_Stride_length_m",  "Mean_Norm_Step_length_ua", "Mean_WalkRatio", "Mean_Norm_WR_ua", "Mean_Stride_time_s", "Mean_StepTime_s",
   
-  "Mean_Double_support_time_p", "Mean_Cadence_step.min^{_1}", "Mean_Norm_Cadence_ua", "Mean_COM_SPARC_Magnitude_ua", "Mean_StepTime_s", "Mean_StanceTime_s", "Mean_SwingTime_s",
+  "Mean_Double_support_time_p", "Mean_Cadence_step.min^{_1}", "Mean_Norm_Cadence_ua", "Mean_COM_SPARC_Magnitude_ua", "Mean_StanceTime_s", "Mean_SwingTime_s",
   
-  "Mean_StepWidth_cm", "Mean_Norm_StepWidth_ua", "Mean_MoS_AP_HS_mm", "Mean_MoS_ML_HS_mm", "Mean_MoS_AP_Stance_mm", "Mean_MoS_ML_Stance_mm", "Mean_MoS_AP_HS_pL0", "Mean_MoS_ML_HS_pL0", "Mean_MoS_AP_Stance_pL0", "Mean_MoS_ML_Stance_pL0",
+  "Mean_StepWidth_cm", "Mean_Norm_StepWidth_ua", "Mean_MoS_AP_HS_mm", "Mean_MoS_ML_HS_mm", "Mean_MoS_AP_Stance_mm", "Mean_MoS_ML_Stance_mm", "Mean_MoS_AP_HS_pL0", "Mean_MoS_ML_HS_pL0", "Mean_MoS_AP_Stance_pL0", "Mean_MoS_ML_Stance_pL0", "Mean_StanceTime_s", "Mean_Single_support_time_p", "Mean_SwingTime_s",
   
   "Mean_GVI_ua", "CV_Norm_StepWidth_ua", "CV_Gait_speed_m.s^{_1}",
   
