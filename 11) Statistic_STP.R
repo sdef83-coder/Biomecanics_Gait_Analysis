@@ -282,10 +282,10 @@ make_pretty_label <- function(varname) {
   }
   
   if (is_si) {
-    # garder uniquement "SI_<nom_variable>" (sans unité)
+    # garder uniquement "SI_<nom_variable>" (avec unité %)
     v <- str_replace(v, "^(SI_[^_]+_[^_]+).*$", "\\1")
     v <- str_replace(v, "^SI_", "")
-    v <- paste0("S.I ", v)
+    v <- paste0("S.I ", v, " (%)")  # <-- MODIF (iii): ajout de (%)
   }
   
   # 2) Unités (suffixes) -> format publication
@@ -295,9 +295,9 @@ make_pretty_label <- function(varname) {
   v <- str_replace(v, "_s$",  " (s)")
   v <- str_replace(v, "_pL0$", " (%L0)")
   v <- str_replace(v, "_p$",   " (%)")
-  v <- str_replace(v, "_ua$",  " (ua)")
+  v <- str_replace(v, "_ua$",  " (au)")  # <-- MODIF (i): ua -> au
   
-  # Vitesse / cadence : gérer variantes “ms1” / “m.s^{-1}” / “m.s^{_1}”
+  # Vitesse / cadence : gérer variantes "ms1" / "m.s^{-1}" / "m.s^{_1}"
   v <- str_replace(v, "_ms1$", " (m/s)")
   v <- str_replace(v, "_m\\.s\\^\\{-1\\}$", " (m/s)")
   v <- str_replace(v, "_m\\.s\\^\\{_1\\}$", " (m/s)")
@@ -310,11 +310,20 @@ make_pretty_label <- function(varname) {
   v <- str_replace(v, "_step\\.min\\^\\{\\-1\\}$", " (step/min)")
   v <- str_replace(v, "_step\\.min\\^\\{\\-?1\\}$", " (step/min)")
   
-  # 3) Exception demandée : Norm Gait Speed doit être (ua) même si m/s
-  v <- str_replace(v, "^Norm Gait Speed \\(m/s\\)$", "Norm Gait Speed (ua)")
-  v <- str_replace(v, "^Norm_Gait_Speed \\(m/s\\)$", "Norm Gait Speed (ua)")
-  v <- str_replace(v, "^Norm_Gait_Speed$", "Norm Gait Speed (ua)")
-  v <- str_replace(v, "^Norm Gait Speed$", "Norm Gait Speed (ua)")
+  # 3) Exception demandée : Norm Gait Speed doit être (au) même si m/s
+  v <- str_replace(v, "^Norm Gait Speed \\(m/s\\)$", "Norm Gait Speed (au)")
+  v <- str_replace(v, "^Norm_Gait_Speed \\(m/s\\)$", "Norm Gait Speed (au)")
+  v <- str_replace(v, "^Norm_Gait_Speed$", "Norm Gait Speed (au)")
+  v <- str_replace(v, "^Norm Gait Speed$", "Norm Gait Speed (au)")
+  
+  # <-- MODIF (iii): Walk Ratio en cm.min.pas^-1
+  v <- str_replace(v, "^WalkRatio$", "Walk Ratio (cm.min.step^-1)")
+  v <- str_replace(v, "^Walk_?Ratio$", "Walk Ratio (cm.min.step^-1)")
+  
+  # <-- MODIF (iv): COM SPARC Magnitude -> SPARC
+  v <- str_replace(v, "^COM SPARC Magnitude \\(au\\)$", "SPARC (au)")
+  v <- str_replace(v, "^COM_SPARC_Magnitude \\(au\\)$", "SPARC (au)")
+  v <- str_replace(v, "^COM_SPARC_Magnitude$", "SPARC (au)")
   
   # 4) Rendre lisible : underscores -> espaces
   v <- str_replace_all(v, "_", " ")
@@ -322,7 +331,10 @@ make_pretty_label <- function(varname) {
   # 5) Petites mises en forme (optionnel mais utile pour article)
   v <- str_replace_all(v, "\\bAP\\b", "AP")
   v <- str_replace_all(v, "\\bML\\b", "ML")
-  v <- str_replace_all(v, "\\bHS\\b", "HS")
+  
+  # <-- MODIF (v): Retirer "HS" des MoS
+  v <- str_replace_all(v, "\\bHS\\b", "")
+  v <- str_replace_all(v, "  +", " ")  # nettoyer les doubles espaces
   
   # Double support time : harmoniser
   v <- str_replace_all(v, "Double support time", "Double support time")
@@ -653,7 +665,7 @@ par(mfrow = c(1, 1))
 # 15.7) Fonction : création d’un radar plot pour UNE surface
 create_surface_radar <- function(surf_name, df_full, vars, labels) {
   
-  # A) Calcul des moyennes par groupe d’âge (pour la surface)
+  # A) Calcul des moyennes par groupe d'âge (pour la surface)
   data_avg <- df_full %>%
     dplyr::filter(Surface == surf_name) %>%
     dplyr::group_by(AgeGroup) %>%
@@ -695,9 +707,6 @@ create_surface_radar <- function(surf_name, df_full, vars, labels) {
   colnames(normalized_avg) <- labels
   
   # Format attendu par fmsb::radarchart :
-  # - 1ère ligne : max (=1)
-  # - 2ème ligne : min (=0)
-  # - lignes suivantes : données (ici = moyennes par groupe)
   final_radar_avg <- rbind(rep(1, length(vars)), rep(0, length(vars)), normalized_avg)
   
   # E) Normalisation des individus (0–1)
@@ -711,7 +720,7 @@ create_surface_radar <- function(surf_name, df_full, vars, labels) {
   
   colnames(normalized_indiv) <- labels
   
-  # F) Couleurs : correction du libellé Adultes -> Adults
+  # F) Couleurs
   age_colors_fixed <- age_colors
   if ("Adultes" %in% names(age_colors_fixed) && !("Adults" %in% names(age_colors_fixed))) {
     age_colors_fixed["Adults"] <- age_colors_fixed["Adultes"]
@@ -721,17 +730,12 @@ create_surface_radar <- function(surf_name, df_full, vars, labels) {
   colors_border_avg <- age_colors_fixed
   colors_in_avg <- grDevices::adjustcolor(colors_border_avg, alpha.f = 0.20)
   
-  # G) Tracé en 3 couches (du fond vers l’avant)
-  # 1) Cadre (axes, grille, titre) avec polygones invisibles mais "valides"
-  # 2) Individus (gris, derrière)
-  # 3) Moyennes de groupe (couleur, devant)
-  
   # =========================
-  # G1) Cadre du radar
+  # G1) Cadre du radar INITIAL
   # =========================
   
   ng <- nrow(data_avg)
-  transparent <- grDevices::adjustcolor("white", alpha.f = 0)  # ou "transparent"
+  transparent <- grDevices::adjustcolor("white", alpha.f = 0)
   
   fmsb::radarchart(
     final_radar_avg,
@@ -759,10 +763,10 @@ create_surface_radar <- function(surf_name, df_full, vars, labels) {
     mins[[i]] + pct * (maxs[[i]] - mins[[i]])
   })
   
-  # --- Fond coloré par domaine (AJOUT)
+  # --- Fond coloré par domaine
   domains_by_var <- get_domain_for_vars(vars, domains_vars)
   
-  par(new = TRUE)  # superpose sur le même repère
+  par(new = TRUE)
   draw_domain_background(
     domains_by_var = domains_by_var,
     domain_cols    = domain_colors,
@@ -770,27 +774,35 @@ create_surface_radar <- function(surf_name, df_full, vars, labels) {
     r              = 1
   )
   
-  # === AJOUT: Affichage des étiquettes de valeurs réelles ===
-  # (APRÈS les fonds colorés pour qu'elles soient visibles)
+  # === AFFICHAGE DES ÉTIQUETTES DE VALEURS RÉELLES ===
+  # CRITIQUE: Ceci doit être fait AVANT les par(new=TRUE) suivants
+  # car sinon le système de coordonnées change
+  
   for (i in seq_len(nvar)) {
     angle <- angles[i]
     
     for (j in seq_along(pct)) {
       r <- r_levels[j]
       
-      # Position du texte (légèrement décalé vers l'extérieur)
-      x_pos <- r * cos(angle) * 1.05
-      y_pos <- r * sin(angle) * 1.05
+      # Position exacte sur le cercle (sans décalage)
+      x_pos <- r * cos(angle)
+      y_pos <- r * sin(angle)
       
       # Valeur réelle
       val <- round(ticks_real[j, i], 2)
       
-      # Afficher le texte avec fond blanc semi-transparent
+      # Calculer un petit décalage pour éviter que le texte chevauche l'axe
+      # Le décalage dépend de l'angle pour positionner le texte vers l'extérieur
+      offset <- 0.08  # distance du décalage
+      x_offset <- offset * cos(angle)
+      y_offset <- offset * sin(angle)
+      
+      # Afficher avec fond blanc semi-transparent pour lisibilité
       text(
-        x = x_pos,
-        y = y_pos,
+        x = x_pos + x_offset,
+        y = y_pos + y_offset,
         labels = val,
-        cex = 0.5,
+        cex = 0.45,
         col = "grey20",
         font = 1
       )
@@ -893,7 +905,6 @@ for (s in c("Plat", "Medium", "High")) {
   par(op)
   dev.off()
 }
-
 
 
 

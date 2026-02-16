@@ -261,7 +261,7 @@ Xpcs_all     = score(:,1:nPC_final);
 rng(42);
 
 % --- Sélection robuste de k (vote multi-critères + bootstrap ARI) ---
-kRange = 2:10;
+kRange = 1:10;
 [sil_vals,ch_vals,db_vals,gap_vals,gap_th] = criteria_curves(Xpcs_all,kRange);
 ari_mean = bootstrap_ari(Xpcs_all,kRange,100);
 
@@ -306,7 +306,7 @@ grid on; title(sprintf('Global score ↑ (k*=%d)',k_global)); xlabel('k');
 exportgraphics(fig_kcrit, fullfile(outdir, "03b_Kselection_multiCriteria_GLOBAL_"+ts+".png"), 'Resolution',300);
 
 % === ÉVALUATION COMPARATIVE (k=2→10) — TABLEAU SYNTHÉTIQUE ===
-kRange_valid = 2:10;
+kRange_valid = 1:10;
 validity = table('Size',[numel(kRange_valid) 7], ...
     'VariableNames', {'k','CH','Silhouette','DB','Gap','DNg','DNs'}, ...
     'VariableTypes', {'double','double','double','double','double','double','double'});
