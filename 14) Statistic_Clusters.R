@@ -1428,3 +1428,788 @@ print(all_stats_results)
 
 print("=== RÉSUMÉ DES TAILLES D'EFFET ===")
 print(effect_sizes_summary)
+
+
+# =========================================================
+# IV - BIS : TRAJECTOIRES DE MIGRATION DES ENFANTS
+#            Even --> Medium --> High
+# =========================================================
+# Cette section identifie à quel moment de la progression
+# de surface les enfants "migrants" ont basculé de cluster.
+#
+# Profils de trajectoire possibles (parmi les enfants en C1 sur Even) :
+#   - "Stable"         : C1 → C1 → C1
+#   - "Early migrant"  : C1 → C2 → C2  (bascule dès Medium)
+#   - "Late migrant"   : C1 → C1 → C2  (bascule uniquement sur High)
+#   - "Transient"      : C1 → C2 → C1  (migration instable, retour sur High)
+# =========================================================
+
+
+# ---------------------------------------------------------
+# 1) CONSTRUCTION DU TABLEAU DE TRAJECTOIRES
+# ---------------------------------------------------------
+
+# On part de df_children (déjà filtré sur AgeGroup "Enfants"/"Children")
+# et on extrait les ClusterID pour les 3 surfaces
+
+trajectories_children <- df_children %>%
+  filter(Condition %in% c("Plat", "Medium", "High")) %>%
+  select(Participant, Condition, ClusterID) %>%
+  pivot_wider(names_from = Condition, values_from = ClusterID) %>%
+  rename(
+    Cluster_Even   = Plat,
+    Cluster_Medium = Medium,
+    Cluster_High   = High
+  ) %>%
+  # Garder uniquement les participants avec les 3 conditions
+  filter(!is.na(Cluster_Even) & !is.na(Cluster_Medium) & !is.na(Cluster_High))
+
+# Vérification
+cat("Nombre d'enfants avec les 3 surfaces :", nrow(trajectories_children), "\n")
+View(trajectories_children)
+
+
+# ---------------------------------------------------------
+# 2) CLASSIFICATION DES TRAJECTOIRES
+# ---------------------------------------------------------
+
+trajectories_children <- trajectories_children %>%
+  mutate(
+    Trajectory = case_when(
+      # Enfants de C1 sur Even (les "migrants potentiels")
+      Cluster_Even == 1 & Cluster_Medium == 1 & Cluster_High == 1 ~ "Stable C1",
+      Cluster_Even == 1 & Cluster_Medium == 2 & Cluster_High == 2 ~ "Early Migrant",
+      Cluster_Even == 1 & Cluster_Medium == 1 & Cluster_High == 2 ~ "Late Migrant",
+      Cluster_Even == 1 & Cluster_Medium == 2 & Cluster_High == 1 ~ "Transient",
+      # Cas hors focus (déjà en C2 sur Even)
+      Cluster_Even == 2 & Cluster_Medium == 2 & Cluster_High == 2 ~ "Stable C2",
+      Cluster_Even == 2 & Cluster_Medium == 1 & Cluster_High == 1 ~ "Reverse Migrant Early",
+      Cluster_Even == 2 & Cluster_Medium == 2 & Cluster_High == 1 ~ "Reverse Migrant Late",
+      Cluster_Even == 2 & Cluster_Medium == 1 & Cluster_High == 2 ~ "Reverse Transient",
+      TRUE ~ "Other"
+    ),
+    # Version courte pour le diagramme
+    Trajectory_Label = paste0("C", Cluster_Even, " → C", Cluster_Medium, " → C", Cluster_High)
+  )
+
+# Tableau de résumé des trajectoires
+cat("\n=== TABLEAU DES TRAJECTOIRES DE MIGRATION ===\n")
+recap_trajectories <- trajectories_children %>%
+  count(Trajectory, Trajectory_Label) %>%
+  arrange(desc(n)) %>%
+  mutate(Pct = round(100 * n / sum(n), 1))
+
+print(recap_trajectories)
+
+# Focus sur les profils C1 → ...
+cat("\n=== FOCUS : ENFANTS DÉBUTANT EN C1 (Even) ===\n")
+recap_c1_starters <- trajectories_children %>%
+  filter(Cluster_Even == 1) %>%
+  count(Trajectory, Trajectory_Label) %>%
+  arrange(desc(n)) %>%
+  mutate(Pct = round(100 * n / sum(n), 1))
+
+print(recap_c1_starters)
+
+# Export CSV
+write_csv(trajectories_children, "Clusters_Children_Trajectories_3surfaces.csv")
+
+
+# ---------------------------------------------------------
+# 3) JOINTURE AVEC LES MÉTADONNÉES (pour caractériser les profils)
+# ---------------------------------------------------------
+
+df_traj_analysis <- trajectories_children %>%
+  left_join(df_meta_clean, by = "Participant") %>%
+  left_join(df_pa_clean, by = c("Participant" = "PARTICIPANT")) %>%
+  mutate(
+    Trajectory = factor(Trajectory, levels = c(
+      "Stable C1", "Early Migrant", "Late Migrant", "Transient",
+      "Stable C2", "Reverse Migrant Early", "Reverse Migrant Late",
+      "Reverse Transient", "Other"
+    ))
+  )
+
+
+# ---------------------------------------------------------
+# 4) DIAGRAMME DE SANKEY / ALLUVIAL (Even → Medium → High)
+# ---------------------------------------------------------
+
+# 4.1 Préparation des données pour le diagramme alluvial
+
+# Palette de couleurs pour les trajectoires principales
+traj_colors <- c(
+  "Stable C1"           = "#3498db",   # Bleu (stable performant)
+  "Early Migrant"       = "#e74c3c",   # Rouge (bascule tôt)
+  "Late Migrant"        = "#e67e22",   # Orange (bascule tard)
+  "Transient"           = "#9b59b6",   # Violet (instable)
+  "Stable C2"           = "#c0392b",   # Rouge foncé (stable moins performant)
+  "Reverse Migrant Early" = "#27ae60", # Vert (amélioration précoce)
+  "Reverse Migrant Late"  = "#2ecc71", # Vert clair (amélioration tardive)
+  "Reverse Transient"   = "#f39c12",   # Jaune (instable autre sens)
+  "Other"               = "grey60"
+)
+
+# On force l'ordre des clusters pour la lisibilité (C1 = en bas, C2 = en haut)
+df_alluvial <- trajectories_children %>%
+  mutate(
+    Even   = factor(paste0("C", Cluster_Even),   levels = c("C2", "C1")),
+    Medium = factor(paste0("C", Cluster_Medium), levels = c("C2", "C1")),
+    High   = factor(paste0("C", Cluster_High),   levels = c("C2", "C1"))
+  ) %>%
+  group_by(Trajectory, Even, Medium, High) %>%
+  summarise(n = n(), .groups = "drop")
+
+
+# 4.2 Création du diagramme Sankey / Alluvial (ggalluvial)
+plot_sankey <- ggplot(
+  df_alluvial,
+  aes(y = n, axis1 = Even, axis2 = Medium, axis3 = High)
+) +
+  # Rubans de flux colorés par trajectoire
+  geom_alluvium(
+    aes(fill = Trajectory),
+    width = 1/8,
+    alpha = 0.70,
+    discern = FALSE
+  ) +
+  
+  # Blocs de clusters (strates)
+  geom_stratum(
+    width = 1/6,
+    fill = "white",
+    color = "black",
+    linewidth = 0.6
+  ) +
+  
+  # Étiquettes dans les blocs : Cluster + effectif
+  geom_text(
+    stat = "stratum",
+    aes(label = after_stat(stratum)),
+    size = 3.5,
+    fontface = "bold",
+    color = "black"
+  ) +
+  
+  # Couleurs des trajectoires
+  scale_fill_manual(values = traj_colors) +
+  
+  # Axes
+  scale_x_discrete(
+    limits = c("Even", "Medium", "High"),
+    expand = c(0.05, 0.05)
+  ) +
+  scale_y_continuous(
+    name = "Number of children",
+    breaks = scales::breaks_pretty()
+  ) +
+  
+  # Titres et labels
+  labs(
+    title    = "Children gait cluster trajectories across surfaces",
+    subtitle = "Flows represent individual children shifting cluster membership",
+    fill     = "Trajectory",
+    x        = "Walking Surface"
+  ) +
+  
+  # Thème
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title    = element_text(hjust = 0.5, face = "bold", size = 14),
+    plot.subtitle = element_text(hjust = 0.5, size = 10, color = "grey40"),
+    axis.text.x   = element_text(size = 12, face = "bold", color = "black"),
+    axis.text.y   = element_text(size = 9),
+    legend.position  = "right",
+    legend.title  = element_text(face = "bold"),
+    panel.grid    = element_blank()
+  )
+
+print(plot_sankey)
+
+
+# ---------------------------------------------------------
+# 5) VERSION ALTERNATIVE : FOCUS SUR LES ENFANTS EN C1 SUR EVEN
+#    (= les "migrants potentiels", la population d'intérêt principale)
+# ---------------------------------------------------------
+
+df_alluvial_c1 <- trajectories_children %>%
+  filter(Cluster_Even == 1) %>%
+  mutate(
+    Even   = factor(paste0("C", Cluster_Even),   levels = c("C2", "C1")),
+    Medium = factor(paste0("C", Cluster_Medium), levels = c("C2", "C1")),
+    High   = factor(paste0("C", Cluster_High),   levels = c("C2", "C1"))
+  ) %>%
+  group_by(Trajectory, Even, Medium, High) %>%
+  summarise(n = n(), .groups = "drop")
+
+# Couleurs simplifiées pour ce focus
+traj_colors_c1 <- c(
+  "Stable C1"     = "#3498db",
+  "Early Migrant" = "#e74c3c",
+  "Late Migrant"  = "#e67e22",
+  "Transient"     = "#9b59b6"
+)
+
+plot_sankey_c1 <- ggplot(
+  df_alluvial_c1,
+  aes(y = n, axis1 = Even, axis2 = Medium, axis3 = High)
+) +
+  geom_alluvium(
+    aes(fill = Trajectory),
+    width = 1/8,
+    alpha = 0.75,
+    discern = FALSE
+  ) +
+  geom_stratum(
+    width = 1/6,
+    fill = "white",
+    color = "black",
+    linewidth = 0.7
+  ) +
+  geom_text(
+    stat = "stratum",
+    aes(label = after_stat(stratum)),
+    size = 4,
+    fontface = "bold",
+    color = "black"
+  ) +
+  scale_fill_manual(
+    values = traj_colors_c1,
+    labels = c(
+      "Stable C1"     = "Stable (C1 → C1 → C1)",
+      "Early Migrant" = "Early Migrant (C1 → C2 → C2)",
+      "Late Migrant"  = "Late Migrant (C1 → C1 → C2)",
+      "Transient"     = "Transient (C1 → C2 → C1)"
+    )
+  ) +
+  scale_x_discrete(
+    limits = c("Even", "Medium", "High"),
+    expand = c(0.05, 0.05)
+  ) +
+  scale_y_continuous(
+    name = "Number of children",
+    breaks = scales::breaks_pretty()
+  ) +
+  labs(
+    title    = "Migration trajectories of children starting in Cluster 1 (Even surface)",
+    subtitle = "When do children shift their gait profile toward Cluster 2?",
+    fill     = "Migration Profile",
+    x        = "Walking Surface"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title    = element_text(hjust = 0.5, face = "bold", size = 13),
+    plot.subtitle = element_text(hjust = 0.5, size = 10, color = "grey40"),
+    axis.text.x   = element_text(size = 12, face = "bold", color = "black"),
+    axis.text.y   = element_text(size = 9),
+    legend.position  = "right",
+    legend.title  = element_text(face = "bold", size = 10),
+    legend.text   = element_text(size = 9),
+    panel.grid    = element_blank()
+  )
+
+print(plot_sankey_c1)
+
+
+# ---------------------------------------------------------
+# 6) STATISTIQUES : COMPARAISON EARLY vs LATE MIGRANT
+#    (sur les variables anthropométriques et d'activité physique)
+# ---------------------------------------------------------
+
+df_migrant_comparison <- df_traj_analysis %>%
+  filter(Trajectory %in% c("Early Migrant", "Late Migrant"))
+
+# Vérification des effectifs
+cat("\n=== EFFECTIFS : EARLY vs LATE MIGRANT ===\n")
+print(table(df_migrant_comparison$Trajectory))
+
+if (nrow(df_migrant_comparison) >= 4) {
+  
+  # Tests de comparaison (Wilcoxon car petits effectifs probables)
+  vars_comparaison <- c("AgeMonths", "Height_cm", "Weight_kg", "PA_Zscore")
+  
+  stats_migrant_type <- df_migrant_comparison %>%
+    pivot_longer(cols = all_of(vars_comparaison),
+                 names_to = "Variable", values_to = "Value") %>%
+    group_by(Variable) %>%
+    wilcox_test(Value ~ Trajectory) %>%
+    add_significance() %>%
+    mutate(
+      Variable = dplyr::recode(Variable,
+                               "AgeMonths"  = "Age (months)",
+                               "Height_cm"  = "Height (cm)",
+                               "Weight_kg"  = "Weight (kg)",
+                               "PA_Zscore"  = "Physical Activity (Z-score)"
+      )
+    )
+  
+  cat("\n=== COMPARAISON EARLY vs LATE MIGRANT (Wilcoxon) ===\n")
+  print(stats_migrant_type)
+  
+  write_csv(stats_migrant_type, "Stats_EarlyVsLate_Migrant_Children.csv")
+  
+} else {
+  cat("Effectifs insuffisants pour la comparaison Early vs Late Migrant.\n")
+}
+
+
+# ---------------------------------------------------------
+# 7) EXPORT DES FIGURES
+# ---------------------------------------------------------
+
+# Figure 1 : Toutes trajectoires (tous enfants)
+ggsave(
+  filename = "Sankey_All_Trajectories_Children.png",
+  plot = plot_sankey,
+  width = 28, height = 18, units = "cm",
+  dpi = 600, bg = "white"
+)
+ggsave(
+  filename = "Sankey_All_Trajectories_Children.pdf",
+  plot = plot_sankey,
+  width = 28, height = 18, units = "cm"
+)
+
+# Figure 2 : Focus C1 starters (population principale)
+ggsave(
+  filename = "Sankey_C1Starters_Trajectories_Children.png",
+  plot = plot_sankey_c1,
+  width = 28, height = 18, units = "cm",
+  dpi = 600, bg = "white"
+)
+ggsave(
+  filename = "Sankey_C1Starters_Trajectories_Children.pdf",
+  plot = plot_sankey_c1,
+  width = 28, height = 18, units = "cm"
+)
+
+message("=== IV-bis terminé ===")
+message("Fichiers créés :")
+message("  - Clusters_Children_Trajectories_3surfaces.csv")
+message("  - Sankey_All_Trajectories_Children.png / .pdf")
+message("  - Sankey_C1Starters_Trajectories_Children.png / .pdf")
+message("  - Stats_EarlyVsLate_Migrant_Children.csv (si effectifs suffisants)")
+
+
+
+# ___________________________________________________________________________
+# V - COMPARAISON DES 3 PROFILS D'ENFANTS : STABLE C1, MIGRANT, STABLE C2
+# ___________________________________________________________________________
+# Cette section compare les caractéristiques anthropométriques et d'activité
+# physique entre 3 groupes d'enfants basés sur leur comportement Even → High :
+#   - Stable C1     : C1 sur Even ET C1 sur High
+#   - Migrant C1→C2 : C1 sur Even ET C2 sur High
+#   - Stable C2     : C2 sur Even ET C2 sur High
+# ___________________________________________________________________________
+
+
+# =========================================================
+# 1) IDENTIFICATION DES 3 PROFILS
+# =========================================================
+
+# 1.1 Préparation des données de migration Even → High (enfants uniquement)
+profiles_3groups <- df_children %>%
+  filter(Condition %in% c("Plat", "High")) %>%
+  select(Participant, Condition, ClusterID) %>%
+  pivot_wider(names_from = Condition, values_from = ClusterID) %>%
+  rename(Cluster_Even = Plat, Cluster_High = High) %>%
+  # Garder uniquement ceux qui ont les deux conditions
+  filter(!is.na(Cluster_Even) & !is.na(Cluster_High))
+
+# 1.2 Classification en 3 profils
+profiles_3groups <- profiles_3groups %>%
+  mutate(
+    Profile = case_when(
+      Cluster_Even == 1 & Cluster_High == 1 ~ "Stable C1",
+      Cluster_Even == 1 & Cluster_High == 2 ~ "Migrant C1→C2",
+      Cluster_Even == 2 & Cluster_High == 2 ~ "Stable C2",
+      TRUE ~ "Other"  # C2→C1 (migration inverse) ou autres cas rares
+    )
+  )
+
+# 1.3 Vérification des effectifs
+cat("\n=== RÉPARTITION DES 3 PROFILS ===\n")
+table_profiles <- table(profiles_3groups$Profile)
+print(table_profiles)
+
+# Ne garder que les 3 profils d'intérêt
+profiles_3groups <- profiles_3groups %>%
+  filter(Profile %in% c("Stable C1", "Migrant C1→C2", "Stable C2"))
+
+cat("\nEffectifs finaux après filtrage :\n")
+print(table(profiles_3groups$Profile))
+
+
+# =========================================================
+# 2) JOINTURE AVEC LES VARIABLES D'INTÉRÊT
+# =========================================================
+
+# 2.1 Métadonnées (âge, sexe, anthropométrie)
+df_profiles <- profiles_3groups %>%
+  left_join(df_meta_clean, by = "Participant")
+
+# 2.2 Activité physique (Z-score)
+df_profiles <- df_profiles %>%
+  left_join(df_pa_clean, by = c("Participant" = "PARTICIPANT"))
+
+# 2.3 Factorisation du profil avec ordre logique
+df_profiles$Profile <- factor(
+  df_profiles$Profile, 
+  levels = c("Stable C1", "Migrant C1→C2", "Stable C2"),
+  ordered = TRUE
+)
+
+# Vérification
+View(df_profiles)
+summary(df_profiles)
+
+# Export CSV
+write_csv(df_profiles, "Profiles_3Groups_Children.csv")
+
+
+# =========================================================
+# 3) STATISTIQUES DESCRIPTIVES : TABLEAU RÉCAPITULATIF
+# =========================================================
+
+library(gtsummary)
+library(gt)
+
+# 3.1 Tableau avec Médiane [IQR] et test de Kruskal-Wallis
+tab_profiles <- df_profiles %>%
+  select(Profile, AgeMonths, Sex, PA_Zscore) %>%
+  tbl_summary(
+    by = Profile,
+    label = list(
+      AgeMonths ~ "Age (months)",
+      Sex ~ "Sex",
+      PA_Zscore ~ "Physical Activity (Z-score)"
+    ),
+    statistic = list(
+      all_continuous() ~ "{median} [{p25}, {p75}]",  # MÉDIANE + IQR
+      all_categorical() ~ "{n} ({p}%)"
+    ),
+    digits = list(all_continuous() ~ 2),
+    missing = "no"
+  ) %>%
+  add_p(
+    test = list(
+      all_continuous() ~ "kruskal.test",  # KRUSKAL-WALLIS
+      all_categorical() ~ "fisher.test"
+    )
+  ) %>%
+  add_overall() %>%
+  bold_labels() %>%
+  modify_header(label ~ "**Variable**") %>%
+  modify_spanning_header(all_stat_cols() ~ "**Profile (Even → High)**") %>%
+  modify_footnote(
+    all_stat_cols() ~ "Median [IQR] for continuous; n (%) for categorical. P-values from Kruskal-Wallis or Fisher's exact test."
+  )
+
+# Affichage
+print(tab_profiles)
+
+
+# =========================================================
+# 4) EXPORT DU TABLEAU (PDF + PNG)
+# =========================================================
+
+gt_table_profiles <- tab_profiles %>% as_gt()
+
+# Export PDF
+gt::gtsave(gt_table_profiles, "Table_Profiles_3Groups_Children.pdf")
+
+# Export PNG
+gt::gtsave(gt_table_profiles, "Table_Profiles_3Groups_Children.png", expand = 10)
+
+message("Tableau exporté : Table_Profiles_3Groups_Children.pdf / .png")
+
+
+# =========================================================
+# 5) TESTS POST-HOC (COMPARAISONS 2 À 2)
+# =========================================================
+# Si l'ANOVA est significative, on fait des comparaisons par paires
+
+library(rstatix)
+
+# 5.1 Test de Tukey (post-hoc après ANOVA)
+vars_continuous <- c("AgeMonths", "PA_Zscore")
+
+posthoc_results <- lapply(vars_continuous, function(v) {
+  df_profiles %>%
+    tukey_hsd(as.formula(paste(v, "~ Profile"))) %>%
+    mutate(Variable = v, .before = 1)
+}) %>%
+  bind_rows() %>%
+  mutate(
+    Variable = dplyr::recode(Variable,
+                             "AgeMonths"  = "Age (months)",
+                             "PA_Zscore"  = "Physical Activity (Z-score)"
+    )
+  ) %>%
+  add_significance("p.adj")
+
+cat("\n=== TESTS POST-HOC (TUKEY HSD) ===\n")
+print(posthoc_results)
+
+# Export CSV
+write_csv(posthoc_results, "PostHoc_Profiles_3Groups_Children.csv")
+
+
+# =========================================================
+# 6) VISUALISATIONS : BOXPLOTS COMPARATIFS
+# =========================================================
+
+# Palette de couleurs pour les 3 profils
+cols_profiles <- c(
+  "Stable C1"     = "#3498db",  # Bleu (stable performant)
+  "Migrant C1→C2" = "#e67e22",  # Orange (transition)
+  "Stable C2"     = "#e74c3c"   # Rouge (stable moins performant)
+)
+
+# 6.1 BOXPLOT : ÂGE
+p_age_3groups <- ggplot(df_profiles, aes(x = Profile, y = AgeMonths, fill = Profile)) +
+  geom_boxplot(alpha = 0.7, outlier.shape = NA, color = "black") +
+  geom_jitter(width = 0.2, alpha = 0.4, size = 1.5, color = "black") +
+  scale_fill_manual(values = cols_profiles) +
+  labs(
+    title = "Age distribution by profile",
+    x = "Profile (Even → High)",
+    y = "Age (months)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 12),
+    legend.position = "none",
+    panel.grid.major.x = element_blank(),
+    axis.text.x = element_text(angle = 15, hjust = 1)
+  )
+
+
+# 6.4 BOXPLOT : ACTIVITÉ PHYSIQUE
+p_pa_3groups <- ggplot(df_profiles, aes(x = Profile, y = PA_Zscore, fill = Profile)) +
+  geom_boxplot(alpha = 0.7, outlier.shape = NA, color = "black") +
+  geom_jitter(width = 0.2, alpha = 0.4, size = 1.5, color = "black") +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey40") +
+  scale_fill_manual(values = cols_profiles) +
+  labs(
+    title = "Physical activity by profile",
+    x = "Profile (Even → High)",
+    y = "Physical Activity (Z-score)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 12),
+    legend.position = "none",
+    panel.grid.major.x = element_blank(),
+    axis.text.x = element_text(angle = 15, hjust = 1)
+  )
+
+# 6.5 BARPLOT : SEXE
+sex_summary_3groups <- df_profiles %>%
+  group_by(Profile, Sex) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(Profile) %>%
+  mutate(prop = n / sum(n) * 100)
+
+p_sex_3groups <- ggplot(sex_summary_3groups, aes(x = Profile, y = prop, fill = Sex)) +
+  geom_bar(stat = "identity", position = "dodge", alpha = 0.8, color = "black") +
+  geom_text(
+    aes(label = paste0(n, " (", round(prop, 1), "%)")), 
+    position = position_dodge(width = 0.9), 
+    vjust = -0.5, size = 3
+  ) +
+  scale_fill_manual(values = c("F" = "#FF6B9D", "M" = "#4A90E2")) +
+  labs(
+    title = "Sex distribution by profile",
+    x = "Profile (Even → High)",
+    y = "Percentage (%)",
+    fill = "Sex"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 12),
+    panel.grid.major.x = element_blank(),
+    axis.text.x = element_text(angle = 15, hjust = 1)
+  )
+
+
+# =========================================================
+# 7) ASSEMBLAGE ET EXPORT DES FIGURES
+# =========================================================
+
+library(patchwork)
+
+# 7.1 Figure combinée (2x3 grid)
+p_combined_3groups <- (p_age_3groups | p_sex_3groups | p_pa_3groups) +
+  plot_layout(heights = c(1, 1)) +
+  plot_annotation(
+    title = "Comparison of 3 Children Profiles: Stable C1, Migrant C1→C2, Stable C2",
+    theme = theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 14))
+  )
+
+# Affichage
+print(p_combined_3groups)
+
+# Export PNG haute résolution
+ggsave(
+  filename = "Profiles_3Groups_Children_Comparison.png",
+  plot = p_combined_3groups,
+  width = 32, height = 20, units = "cm",
+  dpi = 600,
+  bg = "white"
+)
+
+# Export PDF
+ggsave(
+  filename = "Profiles_3Groups_Children_Comparison.pdf",
+  plot = p_combined_3groups,
+  width = 32, height = 20, units = "cm"
+)
+
+# 7.2 Exports individuels (optionnel)
+ggsave("Profiles_Age_3Groups.png", plot = p_age_3groups, 
+       width = 14, height = 12, units = "cm", dpi = 600, bg = "white")
+ggsave("Profiles_PA_3Groups.png", plot = p_pa_3groups, 
+       width = 14, height = 12, units = "cm", dpi = 600, bg = "white")
+ggsave("Profiles_Sex_3Groups.png", plot = p_sex_3groups, 
+       width = 14, height = 12, units = "cm", dpi = 600, bg = "white")
+
+
+# =========================================================
+# 8) TESTS STATISTIQUES DÉTAILLÉS + TAILLES D'EFFET
+# =========================================================
+
+# 8.1 Test de Kruskal-Wallis (non-paramétrique, plus robuste)
+library(rstatix)
+library(effectsize)
+
+kruskal_results <- df_profiles %>%
+  pivot_longer(cols = all_of(vars_continuous),
+               names_to = "Variable", values_to = "Value") %>%
+  group_by(Variable) %>%
+  kruskal_test(Value ~ Profile) %>%
+  add_significance() %>%
+  mutate(
+    Variable = dplyr::recode(Variable,
+                             "AgeMonths"  = "Age (months)",
+                             "Height_cm"  = "Height (cm)",
+                             "Weight_kg"  = "Weight (kg)",
+                             "PA_Zscore"  = "Physical Activity (Z-score)"
+    ),
+    p_formatted = format.pval(p, digits = 3, eps = 0.001)
+  )
+
+cat("\n=== RÉSULTATS KRUSKAL-WALLIS (3 GROUPES) ===\n")
+print(kruskal_results)
+
+# 8.2 Taille d'effet : Epsilon² (équivalent de Eta² pour Kruskal-Wallis)
+# Formule : ε² = H / (n² - 1) / (n + 1)
+kruskal_results <- kruskal_results %>%
+  mutate(
+    n_total = n,
+    Epsilon_squared = statistic / ((n^2 - 1) / (n + 1)),
+    Effect_magnitude = case_when(
+      Epsilon_squared < 0.01 ~ "negligible",
+      Epsilon_squared < 0.06 ~ "small",
+      Epsilon_squared < 0.14 ~ "medium",
+      TRUE ~ "large"
+    )
+  )
+
+cat("\n=== TAILLES D'EFFET (EPSILON²) ===\n")
+print(kruskal_results %>% select(Variable, statistic, p, Epsilon_squared, Effect_magnitude))
+
+# =========================================================
+# 8.3) Test Post-hoc
+# =========================================================
+# POST-HOC : Dunn avec correction de Holm
+posthoc_dunn <- df_profiles %>%
+  pivot_longer(cols = all_of(vars_continuous),
+               names_to = "Variable", values_to = "Value") %>%
+  group_by(Variable) %>%
+  dunn_test(Value ~ Profile, p.adjust.method = "holm") %>%
+  add_significance("p.adj") %>%
+  mutate(
+    Variable = dplyr::recode(Variable,
+                             "AgeMonths"  = "Age (months)",
+                             "PA_Zscore"  = "Physical Activity (Z-score)"
+    )
+  )
+
+cat("\n=== TESTS POST-HOC (DUNN avec Holm) ===\n")
+print(posthoc_dunn)
+
+# Export CSV
+write_csv(posthoc_dunn, "PostHoc_Dunn_Profiles_3Groups_Children.csv")
+
+
+# =========================================================
+# 8.4) Test de Fisher pour le Sexe
+# =========================================================
+
+tab_sex_3groups <- table(df_profiles$Profile, df_profiles$Sex)
+fisher_sex_3groups <- fisher_test(tab_sex_3groups) %>%
+  mutate(Variable = "Sex", Test = "Fisher's Exact Test", .before = 1)
+
+cat("\n=== TEST EXACT DE FISHER : SEXE (3 GROUPES) ===\n")
+print(fisher_sex_3groups)
+
+# Cramér's V
+library(rcompanion)
+cramers_v_3groups <- cramerV(tab_sex_3groups)
+cat(paste("\nCramér's V pour Sexe (3 groupes) :", round(cramers_v_3groups, 3), "\n"))
+
+
+# =========================================================
+# 9) EXPORT CONSOLIDÉ DES RÉSULTATS
+# =========================================================
+
+# Formatage Fisher
+fisher_formatted_3groups <- fisher_sex_3groups %>%
+  mutate(
+    p_formatted = format.pval(p, digits = 3, eps = 0.001),
+    Cramers_V = cramers_v_3groups,
+    Effect_magnitude = case_when(
+      cramers_v_3groups < 0.1 ~ "negligible",
+      cramers_v_3groups < 0.3 ~ "small",
+      cramers_v_3groups < 0.5 ~ "moderate",
+      TRUE ~ "large"
+    ),
+    statistic_kw = NA,
+    df_kw = NA,
+    Epsilon_squared = NA,
+    n_total = NA
+  ) %>%
+  rename(p_value = p) %>%
+  select(Variable, Test, statistic_kw, df_kw, n_total, p_value, p_formatted, 
+         p.signif, Epsilon_squared, Cramers_V, Effect_magnitude)
+
+# Combiner Kruskal + Fisher
+all_stats_3groups <- bind_rows(
+  kruskal_results %>% 
+    mutate(
+      Test = "Kruskal-Wallis",
+      Cramers_V = NA,
+      statistic_kw = statistic,
+      df_kw = df
+    ) %>%
+    select(Variable, Test, statistic_kw, df_kw, n_total, p_value = p, 
+           p_formatted, p.signif, Epsilon_squared, Cramers_V, Effect_magnitude),
+  fisher_formatted_3groups
+)
+
+# Export CSV
+write_csv(all_stats_3groups, "Statistical_Tests_Profiles_3Groups.csv")
+
+cat("\n=== TABLEAU RÉCAPITULATIF DES TESTS (3 GROUPES) ===\n")
+print(all_stats_3groups)
+
+message("\n=== Statistiques exportées avec Kruskal-Wallis (non-paramétrique) ===")
+
+message("\n=== SECTION V TERMINÉE ===")
+message("Fichiers créés :")
+message("  - Profiles_3Groups_Children.csv")
+message("  - Table_Profiles_3Groups_Children.pdf / .png")
+message("  - PostHoc_Profiles_3Groups_Children.csv")
+message("  - Profiles_3Groups_Children_Comparison.png / .pdf")
+message("  - Statistical_Tests_Profiles_3Groups.csv")
