@@ -882,3 +882,549 @@ dev.off()
 
 message("Radar plot des clusters généré avec succès !")
 message("Fichiers créés : Radar_Plot_Clusters.pdf et Radar_Plot_Clusters.png")
+
+
+
+# ___________________________________________________________________________
+# IV - MIGRATIONS ENFANTS DE C1 à C2
+# ___________________________________________________________________________
+
+# ANALYSE DES PROFILS DE MIGRATION DES ENFANTS
+# Comparaison entre enfants stables Cluster 1 et migrants vers Cluster 2
+# Entre surfaces Even et High
+
+setwd("C:/Users/silve/Desktop/DOCTORAT/UNIV MONTREAL/TRAVAUX-THESE/Surfaces_Irregulieres/Datas/Script/gaitAnalysisGUI/result/Fig/Clustering")
+
+# =========================================================
+# 0) LIBRAIRIES
+# =========================================================
+library(dplyr)
+library(tidyverse)
+library(readr)
+library(ggplot2)
+library(gtsummary)
+library(gt)
+library(rstatix)
+library(gridExtra)
+library(grid)
+library(patchwork)
+library(rcompanion)
+
+# =========================================================
+# 1) IMPORT DES DONNÉES
+# =========================================================
+
+# 1.1 Données de clustering (avec ClusterID par condition)
+df_clust <- read.csv("DATA_FOR_R_GLOBAL_20260123_1409.csv", sep = ";", check.names = FALSE)
+
+# 1.2 Métadonnées (âge, sexe, anthropométrie)
+df_meta <- read.csv(file.choose(), sep = ";", check.names = FALSE)
+# Note : Aller chercher "participant.metadonnees" dans le dossier stats LMM
+
+# 1.3 Activité physique (z-scores)
+df_pa <- read.csv(file.choose(), sep = ";", check.names = FALSE)
+# Note : Aller chercher "PhysicalActivity_Zscored.csv" généré par le script 12
+
+# Vérification rapide
+View(df_clust)
+View(df_meta)
+View(df_pa)
+
+# =========================================================
+# 2) PRÉPARATION DES DONNÉES
+# =========================================================
+
+# 2.1 Nettoyage des métadonnées (garder seulement les variables nécessaires)
+df_meta_clean <- df_meta %>%
+  select(Participant, AgeMonths, Sex, AgeGroup, Height_cm, Weight_kg, IMC) %>%
+  distinct()
+
+# 2.2 Nettoyage des données d'activité physique
+df_pa_clean <- df_pa %>%
+  select(PARTICIPANT, AgeGroup, Zscore) %>%
+  rename(PA_Zscore = Zscore) %>%
+  distinct()
+
+# 2.3 Jointure cluster + métadonnées
+df <- left_join(df_clust, df_meta_clean, by = "Participant")
+
+# 2.4 Vérifier les noms de colonnes pour l'âge (gérer les doublons possibles)
+if("AgeMonths.x" %in% colnames(df)) {
+  df <- df %>%
+    mutate(AgeMonths = coalesce(AgeMonths.x, AgeMonths.y)) %>%
+    select(-AgeMonths.x, -AgeMonths.y)
+}
+
+if("AgeGroup.x" %in% colnames(df)) {
+  df <- df %>%
+    mutate(AgeGroup = coalesce(AgeGroup.x, AgeGroup.y)) %>%
+    select(-AgeGroup.x, -AgeGroup.y)
+}
+
+# =========================================================
+# 3) IDENTIFICATION DES PROFILS DE MIGRATION (CHILDREN SEULEMENT)
+# =========================================================
+
+# 3.1 Filtrer uniquement les enfants (Children / Enfants)
+# Note : Adapter selon le nom exact dans tes données
+df_children <- df %>%
+  filter(AgeGroup %in% c("Children", "Enfants"))
+
+# 3.2 Créer un tableau de migration Even -> High
+migration_children <- df_children %>%
+  filter(Condition %in% c("Plat", "High")) %>%
+  select(Participant, Condition, ClusterID) %>%
+  pivot_wider(names_from = Condition, values_from = ClusterID) %>%
+  # Renommer pour clarté
+  rename(Cluster_Even = Plat, Cluster_High = High) %>%
+  # Filtrer seulement ceux qui ont les deux conditions
+  filter(!is.na(Cluster_Even) & !is.na(Cluster_High))
+
+# 3.3 Créer la variable "Profil" de migration
+migration_children <- migration_children %>%
+  mutate(
+    Profil = case_when(
+      Cluster_Even == 1 & Cluster_High == 1 ~ "Stable_C1",
+      Cluster_Even == 1 & Cluster_High == 2 ~ "Migrant_C2",
+      TRUE ~ "Autre"  # Pour capturer les autres cas (C2->C1, C2->C2, etc.)
+    )
+  )
+
+# 3.4 Filtrer uniquement les deux profils d'intérêt
+migration_children_filtered <- migration_children %>%
+  filter(Profil %in% c("Stable_C1", "Migrant_C2"))
+
+# Vérification
+table(migration_children_filtered$Profil)
+View(migration_children_filtered)
+
+# =========================================================
+# 4) JOINTURE AVEC LES VARIABLES D'INTÉRÊT
+# =========================================================
+
+# 4.1 Joindre les métadonnées anthropométriques
+df_analysis <- migration_children_filtered %>%
+  left_join(df_meta_clean, by = "Participant")
+
+# 4.2 Joindre l'activité physique z-scorée
+df_analysis <- df_analysis %>%
+  left_join(df_pa_clean, by = c("Participant" = "PARTICIPANT"))
+
+# 4.3 Convertir Profil en facteur ordonné
+df_analysis$Profil <- factor(df_analysis$Profil, 
+                             levels = c("Stable_C1", "Migrant_C2"),
+                             ordered = TRUE)
+
+# Vérification finale
+View(df_analysis)
+summary(df_analysis)
+write_csv(df_analysis, "Clusters_C_Migration.csv")
+# =========================================================
+# 5) STATISTIQUES DESCRIPTIVES
+# =========================================================
+
+# 5.1 Tableau récapitulatif (Mean ± SD pour variables continues, n (%) pour sexe)
+tab_migration <- df_analysis %>%
+  select(Profil, AgeMonths, Height_cm, Weight_kg, Sex, PA_Zscore) %>%
+  tbl_summary(
+    by = Profil,
+    label = list(
+      AgeMonths ~ "Age (months)",
+      Height_cm ~ "Height (cm)",
+      Weight_kg ~ "Weight (kg)",
+      Sex ~ "Sex",
+      PA_Zscore ~ "Physical Activity (Z-score)"
+    ),
+    statistic = list(
+      all_continuous() ~ "{mean} ± {sd}",
+      all_categorical() ~ "{n} ({p}%)"
+    ),
+    digits = list(all_continuous() ~ 2),
+    missing = "no"
+  ) %>%
+  add_p(
+    test = list(
+      all_continuous() ~ "t.test",  # ou "wilcox.test" si préféré
+      all_categorical() ~ "fisher.test"  # ou "chisq.test" si n suffisant
+    )
+  ) %>%
+  add_overall() %>%
+  bold_labels() %>%
+  modify_header(label ~ "**Variable**") %>%
+  modify_spanning_header(all_stat_cols() ~ "**Migration Profile**") %>%
+  modify_footnote(all_stat_cols() ~ "Mean ± SD for continuous; n (%) for categorical")
+
+# Affichage
+print(tab_migration)
+
+# =========================================================
+# 6) EXPORT DU TABLEAU (PDF + PNG)
+# =========================================================
+
+gt_table_migration <- tab_migration %>% as_gt()
+
+# Export PDF
+gt::gtsave(gt_table_migration, "Table_Migration_Children.pdf")
+
+# Export PNG
+gt::gtsave(gt_table_migration, "Table_Migration_Children.png", expand = 10)
+
+message("Tableau exporté dans : ", getwd())
+
+# =========================================================
+# 7) VISUALISATIONS
+# =========================================================
+
+# Palette couleur pour les profils
+cols_profil <- c(
+  "Stable_C1" = "#3498db",    # Bleu (comme Cluster 1)
+  "Migrant_C2" = "#e74c3c"    # Rouge (comme Cluster 2)
+)
+
+# 7.1 BOXPLOT : ÂGE
+p_age <- ggplot(df_analysis, aes(x = Profil, y = AgeMonths, fill = Profil)) +
+  geom_boxplot(alpha = 0.7, outlier.shape = NA, color = "black") +
+  geom_jitter(width = 0.2, alpha = 0.4, size = 1.5, color = "black") +
+  scale_fill_manual(values = cols_profil) +
+  labs(
+    title = "Age distribution by migration profile",
+    x = "Migration Profile",
+    y = "Age (months)",
+    fill = "Profile"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 12),
+    legend.position = "none",
+    panel.grid.major.x = element_blank()
+  )
+
+# 7.2 BOXPLOT : POIDS
+p_weight <- ggplot(df_analysis, aes(x = Profil, y = Weight_kg, fill = Profil)) +
+  geom_boxplot(alpha = 0.7, outlier.shape = NA, color = "black") +
+  geom_jitter(width = 0.2, alpha = 0.4, size = 1.5, color = "black") +
+  scale_fill_manual(values = cols_profil) +
+  labs(
+    title = "Weight distribution by migration profile",
+    x = "Migration Profile",
+    y = "Weight (kg)",
+    fill = "Profile"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 12),
+    legend.position = "none",
+    panel.grid.major.x = element_blank()
+  )
+
+# 7.3 BOXPLOT : TAILLE
+p_height <- ggplot(df_analysis, aes(x = Profil, y = Height_cm, fill = Profil)) +
+  geom_boxplot(alpha = 0.7, outlier.shape = NA, color = "black") +
+  geom_jitter(width = 0.2, alpha = 0.4, size = 1.5, color = "black") +
+  scale_fill_manual(values = cols_profil) +
+  labs(
+    title = "Height distribution by migration profile",
+    x = "Migration Profile",
+    y = "Height (cm)",
+    fill = "Profile"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 12),
+    legend.position = "none",
+    panel.grid.major.x = element_blank()
+  )
+
+# 7.4 BOXPLOT : ACTIVITÉ PHYSIQUE
+p_pa <- ggplot(df_analysis, aes(x = Profil, y = PA_Zscore, fill = Profil)) +
+  geom_boxplot(alpha = 0.7, outlier.shape = NA, color = "black") +
+  geom_jitter(width = 0.2, alpha = 0.4, size = 1.5, color = "black") +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey40") +
+  scale_fill_manual(values = cols_profil) +
+  labs(
+    title = "Physical activity by migration profile",
+    x = "Migration Profile",
+    y = "Physical Activity (Z-score)",
+    fill = "Profile"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 12),
+    legend.position = "none",
+    panel.grid.major.x = element_blank()
+  )
+
+# 7.5 BARPLOT : SEXE
+# Calcul des proportions
+sex_summary <- df_analysis %>%
+  group_by(Profil, Sex) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(Profil) %>%
+  mutate(prop = n / sum(n) * 100)
+
+p_sex <- ggplot(sex_summary, aes(x = Profil, y = prop, fill = Sex)) +
+  geom_bar(stat = "identity", position = "dodge", alpha = 0.8, color = "black") +
+  geom_text(aes(label = paste0(n, " (", round(prop, 1), "%)")), 
+            position = position_dodge(width = 0.9), 
+            vjust = -0.5, size = 3) +
+  scale_fill_manual(values = c("F" = "#FF6B9D", "M" = "#4A90E2")) +
+  labs(
+    title = "Sex distribution by migration profile",
+    x = "Migration Profile",
+    y = "Percentage (%)",
+    fill = "Sex"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 12),
+    panel.grid.major.x = element_blank()
+  )
+
+# =========================================================
+# 8) ASSEMBLAGE ET EXPORT DES FIGURES
+# =========================================================
+
+# 8.1 Figure combinée (2x3 grid)
+p_combined <- (p_age | p_weight | p_height) / 
+  (p_pa | p_sex | plot_spacer()) +
+  plot_layout(heights = c(1, 1)) +
+  plot_annotation(
+    title = "Comparison of Children Migration Profiles (Cluster 1 Even → Cluster 1 or 2 High)",
+    theme = theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 14))
+  )
+
+# Affichage
+p_combined
+
+# Export PNG haute résolution
+ggsave(
+  filename = "Migration_Children_Comparison.png",
+  plot = p_combined,
+  width = 28, height = 18, units = "cm",
+  dpi = 600,
+  bg = "white"
+)
+
+# Export PDF
+ggsave(
+  filename = "Migration_Children_Comparison.pdf",
+  plot = p_combined,
+  width = 28, height = 18, units = "cm"
+)
+
+# 8.2 Exports individuels (optionnel)
+ggsave("Migration_Age.png", plot = p_age, width = 12, height = 10, units = "cm", dpi = 600, bg = "white")
+ggsave("Migration_Weight.png", plot = p_weight, width = 12, height = 10, units = "cm", dpi = 600, bg = "white")
+ggsave("Migration_Height.png", plot = p_height, width = 12, height = 10, units = "cm", dpi = 600, bg = "white")
+ggsave("Migration_PA.png", plot = p_pa, width = 12, height = 10, units = "cm", dpi = 600, bg = "white")
+ggsave("Migration_Sex.png", plot = p_sex, width = 12, height = 10, units = "cm", dpi = 600, bg = "white")
+
+# =========================================================
+# 9) TESTS STATISTIQUES DÉTAILLÉS + TAILLES D'EFFET + EXPORT CSV
+# =========================================================
+
+# 9.1 Test de normalité (Shapiro-Wilk)
+print("=== TESTS DE NORMALITÉ ===")
+normality_tests <- df_analysis %>%
+  group_by(Profil) %>%
+  shapiro_test(AgeMonths, Height_cm, Weight_kg, PA_Zscore) %>%
+  ungroup()
+
+print(normality_tests)
+
+# 9.2 Tests t de Student avec Cohen's d
+print("=== T-TEST : ÂGE ===")
+t_test_age <- df_analysis %>%
+  t_test(AgeMonths ~ Profil) %>%
+  add_significance() %>%
+  mutate(Variable = "Age (months)", .before = 1)
+print(t_test_age)
+
+# Calcul du Cohen's d pour l'âge
+cohens_d_age <- df_analysis %>%
+  cohens_d(AgeMonths ~ Profil, var.equal = FALSE) %>%
+  mutate(Variable = "Age (months)", .before = 1)
+
+print("=== T-TEST : POIDS ===")
+t_test_weight <- df_analysis %>%
+  t_test(Weight_kg ~ Profil) %>%
+  add_significance() %>%
+  mutate(Variable = "Weight (kg)", .before = 1)
+print(t_test_weight)
+
+# Calcul du Cohen's d pour le poids
+cohens_d_weight <- df_analysis %>%
+  cohens_d(Weight_kg ~ Profil, var.equal = FALSE) %>%
+  mutate(Variable = "Weight (kg)", .before = 1)
+
+print("=== T-TEST : TAILLE ===")
+t_test_height <- df_analysis %>%
+  t_test(Height_cm ~ Profil) %>%
+  add_significance() %>%
+  mutate(Variable = "Height (cm)", .before = 1)
+print(t_test_height)
+
+# Calcul du Cohen's d pour la taille
+cohens_d_height <- df_analysis %>%
+  cohens_d(Height_cm ~ Profil, var.equal = FALSE) %>%
+  mutate(Variable = "Height (cm)", .before = 1)
+
+print("=== T-TEST : ACTIVITÉ PHYSIQUE ===")
+t_test_pa <- df_analysis %>%
+  t_test(PA_Zscore ~ Profil) %>%
+  add_significance() %>%
+  mutate(Variable = "Physical Activity (Z-score)", .before = 1)
+print(t_test_pa)
+
+# Calcul du Cohen's d pour l'activité physique
+cohens_d_pa <- df_analysis %>%
+  cohens_d(PA_Zscore ~ Profil, var.equal = FALSE) %>%
+  mutate(Variable = "Physical Activity (Z-score)", .before = 1)
+
+# 9.3 Test du Chi² (ou Fisher exact) pour le Sexe avec Cramér's V
+print("=== TEST EXACT DE FISHER : SEXE ===")
+tab_sex <- table(df_analysis$Profil, df_analysis$Sex)
+fisher_sex <- fisher_test(tab_sex) %>%
+  mutate(Variable = "Sex", .before = 1)
+print(fisher_sex)
+
+# Calcul du Cramér's V (taille d'effet pour test catégoriel)
+library(rcompanion)  # Pour cramerV
+cramers_v_sex <- cramerV(tab_sex)
+print(paste("Cramér's V pour Sexe :", round(cramers_v_sex, 3)))
+
+# =========================================================
+# 9.4 CONSOLIDATION ET EXPORT DES RÉSULTATS STATISTIQUES
+# =========================================================
+
+# A) Regrouper tous les Cohen's d
+all_cohens_d <- bind_rows(
+  cohens_d_age,
+  cohens_d_weight,
+  cohens_d_height,
+  cohens_d_pa
+)
+
+# B) Regrouper tous les tests continus (t-tests) avec tailles d'effet
+all_ttests <- bind_rows(
+  t_test_age,
+  t_test_weight,
+  t_test_height,
+  t_test_pa
+) %>%
+  # Joindre les tailles d'effet (Cohen's d)
+  left_join(
+    all_cohens_d %>% select(Variable, effsize, magnitude),
+    by = "Variable"
+  ) %>%
+  # Sélectionner et renommer les colonnes importantes
+  select(
+    Variable,
+    Test = .y.,
+    group1,
+    group2,
+    n1,
+    n2,
+    statistic,
+    df,
+    p,
+    p.signif,
+    Cohen_d = effsize,
+    Effect_Size = magnitude
+  ) %>%
+  # Formater la p-value et ajouter les infos de test
+  mutate(
+    p_formatted = format.pval(p, digits = 3, eps = 0.001),
+    Test_Type = "t-test (Welch)",
+    method = "Welch Two Sample t-test"  # Ajouté manuellement
+  )
+
+# C) Formater le test de Fisher avec Cramér's V
+fisher_formatted <- fisher_sex %>%
+  mutate(
+    p_formatted = format.pval(p, digits = 3, eps = 0.001),
+    Test_Type = "Fisher's Exact Test",
+    method = "Fisher's Exact Test for Count Data",  # Ajouté manuellement
+    # Ajouter des colonnes vides pour cohérence avec t-tests
+    group1 = "Stable_C1",
+    group2 = "Migrant_C2",
+    statistic = NA,
+    df = NA,
+    n1 = NA,
+    n2 = NA,
+    Test = "Sex",
+    Cohen_d = NA,
+    Cramers_V = cramers_v_sex,
+    Effect_Size = case_when(
+      cramers_v_sex < 0.1 ~ "negligible",
+      cramers_v_sex < 0.3 ~ "small",
+      cramers_v_sex < 0.5 ~ "moderate",
+      TRUE ~ "large"
+    )
+  ) %>%
+  select(
+    Variable,
+    Test,
+    group1,
+    group2,
+    n1,
+    n2,
+    statistic,
+    df,
+    p,
+    p_formatted,
+    p.signif,
+    Cohen_d,
+    Cramers_V,
+    Effect_Size,
+    Test_Type,
+    method
+  )
+
+# D) Combiner tous les résultats statistiques
+all_stats_results <- bind_rows(
+  all_ttests %>% mutate(Cramers_V = NA),  # Ajouter colonne vide pour cohérence
+  fisher_formatted
+) %>%
+  # Réorganiser les colonnes pour meilleure lisibilité
+  select(
+    Variable,
+    Test_Type,
+    method,
+    group1,
+    group2,
+    n1,
+    n2,
+    statistic,
+    df,
+    p,
+    p_formatted,
+    p.signif,
+    Cohen_d,
+    Cramers_V,
+    Effect_Size
+  )
+
+# E) Export en CSV
+write_csv(all_stats_results, "Statistical_Tests_Results_Migration.csv")
+
+# F) Optionnel : Export des tests de normalité
+write_csv(normality_tests, "Normality_Tests_Results_Migration.csv")
+
+# G) Export du tableau des tailles d'effet uniquement
+effect_sizes_summary <- all_stats_results %>%
+  select(Variable, Test_Type, Cohen_d, Cramers_V, Effect_Size, p.signif)
+
+write_csv(effect_sizes_summary, "Effect_Sizes_Summary_Migration.csv")
+
+message("Résultats statistiques exportés :")
+message("  - Statistical_Tests_Results_Migration.csv (complet)")
+message("  - Effect_Sizes_Summary_Migration.csv (tailles d'effet)")
+message("  - Normality_Tests_Results_Migration.csv (normalité)")
+
+# H) Affichage du tableau récapitulatif dans la console
+print("=== TABLEAU RÉCAPITULATIF DES TESTS STATISTIQUES ===")
+print(all_stats_results)
+
+print("=== RÉSUMÉ DES TAILLES D'EFFET ===")
+print(effect_sizes_summary)
