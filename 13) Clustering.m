@@ -33,20 +33,20 @@ domains.Rhythm = {
 
 domains.PosturalControl = {
     'Norm StepWidth (ua)',     'Norm StepWidth (ua)',         'Mean';
-    'MoS_ML_HS_pL0',  'MoS ML HS (%L0)',           'Mean';
-    'MoS_AP_HS_pL0',  'MoS AP HS (%L0)',           'Mean'
+    'MoS_AP_HS_pL0',  'MoS AP HS (%L0)',           'Mean';
+    'MoS_ML_HS_pL0',  'MoS ML HS (%L0)',           'Mean'
+};
+
+domains.Variability = {
+    'GVI (ua)',       'GVI (ua)',                  'Mean';
+    'vitFoulee',      'Gait speed (m.s^{-1})',     'CV' ;
+    'Norm StepWidth (ua)',     'Norm StepWidth (ua)',         'CV' 
 };
 
 domains.Asymmetry = {
     'distFoulee',     'Stride length (m)',         'SI';
     'DoubleSupport',  'Double support time (%)',   'SI';
     'Norm StepWidth (ua)',     'Norm StepWidth (ua)',         'SI'
-};
-
-domains.Variability = {
-    'Norm StepWidth (ua)',     'Norm StepWidth (ua)',         'CV';
-    'GVI (ua)',       'GVI (ua)',                  'Mean';
-    'vitFoulee',      'Gait speed (m.s^{-1})',     'CV'  
 };
 
 
@@ -203,9 +203,9 @@ loadings = corr(dataNorm, score(:, 1:nPC_final));
 fig_heatmap_loadings = figure('Color','w', 'Position', [100 100 1200 800]);
 h_load = heatmap(arrayfun(@(i) sprintf('PC%d (%.1f%%)', i, explained(i)), 1:nPC_final, 'UniformOutput', false), ...
                  allVars_disp, loadings, ...
-                 'Title', sprintf('Variable Loadings on the selected %d principal components (≥70%% variance)', nPC_final), ...
+                 'Title', sprintf('Variable Loadings on the selected %d principal components', nPC_final), ...
                  'XLabel', 'Principal components', ...
-                 'YLabel', 'Spatiotemporal variables', ...
+                 'YLabel', 'Gait variables', ...
                  'Colormap', redblue(256), ...
                  'ColorLimits', [-1, 1]);
 h_load.FontSize = 9;
@@ -228,7 +228,7 @@ for i = 1:nPC_pairplot
             % Diagonale : histogramme de la PC
             histogram(score(:,i), 30, 'FaceColor', [0.3 0.5 0.8], 'EdgeColor', 'none');
             title(sprintf('PC%d (%.1f%%)', i, explained(i)), 'FontSize', 10);
-            ylabel('Fréquence');
+            ylabel('Frequency');
             grid on;
         else
             % Hors diagonale : scatter plot PC_j vs PC_i avec gradient d'âge
@@ -241,7 +241,7 @@ for i = 1:nPC_pairplot
             % Colorbar seulement pour le dernier subplot de chaque ligne
             if j == nPC_pairplot
                 cb = colorbar('eastoutside');
-                cb.Label.String = 'Âge (ans)';
+                cb.Label.String = 'Age (years)';
                 cb.FontSize = 8;
             end
         end
@@ -391,7 +391,7 @@ end
 
 colormap(parula); 
 cb = colorbar; 
-cb.Label.String = 'Âge (années)';
+cb.Label.String = 'Age (years)';
 cb.FontSize = 11;
 
 xlabel(sprintf('PC1 (%.1f%%)', explained(1)), 'FontSize', 12); 
@@ -407,13 +407,13 @@ for i = 1:k_global
     if size(pts2,1) >= 3
         K2 = convhull(pts2(:,1), pts2(:,2));
         plot(pts2(K2,1), pts2(K2,2), '-', 'Color', cols(i,:), ...
-             'LineWidth', 2, 'HandleVisibility', 'off');
+             'LineWidth', 1, 'HandleVisibility', 'off');
     end
 end
 
 % Centroïdes
 plot(Cc_global_pc12(:,1), Cc_global_pc12(:,2), 'kx', ...
-     'MarkerSize', 14, 'LineWidth', 3, 'DisplayName', 'Centroïdes');
+     'MarkerSize', 14, 'LineWidth', 3, 'DisplayName', 'Centroid');
 for i = 1:k_global
     text(Cc_global_pc12(i,1), Cc_global_pc12(i,2), sprintf('  C%d', i), ...
          'FontWeight', 'bold', 'Color', 'k', 'VerticalAlignment', 'middle', ...
@@ -424,8 +424,59 @@ end
 legend('Location', 'best', 'FontSize', 10);
 
 % Annotations d'âge
-AgeStats_global = annotate_age_on_clusters(gca, Xpcs_all_viz, idxCluster_global, ...
-                                           Cc_global_pc12, meta.AgeMonths);
+%AgeStats_global = annotate_age_on_clusters(gca, Xpcs_all_viz, idxCluster_global, Cc_global_pc12, meta.AgeMonths);
+
+%%
+% --- Courbe du coude (WCSS) + Silhouette + ARI sur UNE SEULE FIGURE ---
+WCSS_vals = zeros(size(kRange));
+for kk = 1:numel(kRange)
+    k = kRange(kk);
+
+    [idx_tmp, Ctmp] = kmeans(Xpcs_all, k, ...
+        'Replicates', 20, 'MaxIter', 300, 'Display', 'off');
+
+    % distance de chaque point à SON centroïde
+    d2 = sum((Xpcs_all - Ctmp(idx_tmp, :)).^2, 2);  % n×1
+    WCSS_vals(kk) = sum(d2);
+end
+
+fig_elbow_combo = figure('Color','w', 'Position',[100 100 800 850]);
+tiledlayout(3,1,'TileSpacing','compact','Padding','compact');
+
+kRange_part = kRange(kRange >= 2);
+sil_vals_part = sil_vals(kRange >= 2);
+ari_mean_part = ari_mean(kRange >= 2);
+
+% 1) WCSS
+nexttile;
+plot(kRange, WCSS_vals, '-o', 'LineWidth',1.6); grid on;
+ylabel('WCSS');
+title('k-selection (Global): Elbow + Silhouette + Stability (ARI)');
+xlim([min(kRange) max(kRange)]);
+hold on;
+xline(k_global,'--k',sprintf('k^*=%d',k_global),'LabelVerticalAlignment','bottom');
+
+% 2) Silhouette
+nexttile;
+plot(kRange_part, sil_vals_part, '-o', 'LineWidth',1.6); grid on;
+ylabel('Mean silhouette');
+xlim([2 max(kRange)]);
+hold on;
+xline(k_global,'--k','HandleVisibility','off');
+
+% 3) ARI bootstrap
+nexttile;
+plot(kRange_part, ari_mean_part, '-o', 'LineWidth',1.6); grid on;
+ylabel('ARI (bootstrap mean)');
+xlabel('Number of clusters (k)');
+xlim([2 max(kRange)]);
+hold on;
+xline(k_global,'--k','HandleVisibility','off');
+
+exportgraphics(fig_elbow_combo, fullfile(outdir, "03a_Elbow_Sil_ARI_GLOBAL_"+ts+".png"), 'Resolution',300);
+
+%%
+
 
 exportgraphics(fig_agegrad_shapes, ...
                fullfile(outdir, "04_PC1PC2_AgeGradient_Shapes_GLOBAL_k"+k_global+"_"+ts+".png"), ...
@@ -537,233 +588,134 @@ independentPCA = false;  % false = ACP commune (comparabilité), true = ACP par 
 
 for iC = 1:numel(conds)
     cond = conds{iC};
-    idxCond = meta.Condition==cond;
+    idxCond = meta.Condition == cond;
     nCond = sum(idxCond);
-    if nCond < 6
+    
+    if nCond < 10 % Seuil pour assurer la stabilité
         warning('Condition %s: trop peu d''observations (%d). Clustering sauté.', cond, nCond);
         continue;
     end
 
+    % --- Préparation des données spécifiques à la surface ---
     if independentPCA
         Xnorm_c = dataNorm(idxCond, :);
         [~, score_c, ~, ~, explained_c] = pca(Xnorm_c);
-        pcs_c_viz = score_c(:,1:2);              % viz
-        pcs_c     = score_c(:,1:min(nPC_final,size(score_c,2))); % clustering
+        pcs_c_viz = score_c(:,1:2);              
+        pcs_c     = score_c(:,1:min(nPC_final,size(score_c,2))); 
         expl1 = explained_c(1); expl2 = explained_c(2);
     else
-        pcs_c_viz = Xpcs_all_viz(idxCond,:);     % projection 2D commune
-        pcs_c     = Xpcs_all(idxCond,:);         % nPC_final commun
+        pcs_c_viz = Xpcs_all_viz(idxCond,:);     
+        pcs_c     = Xpcs_all(idxCond,:);         
         expl1 = explained(1); expl2 = explained(2);
         Xnorm_c = dataNorm(idxCond, :);
     end
     meta_c = meta(idxCond,:);
+    dataRAW_c = dataMat(idxCond, :);
 
-    % === ÉVALUATION COMPARATIVE (k=2→10) — TABLEAU SYNTHÉTIQUE ===
-    kRange_valid_c = 2:min(10, max(2, nCond-1));
-    validity_c = table('Size',[numel(kRange_valid_c) 7], ...
-        'VariableNames', {'k','CH','Silhouette','DB','Gap','DNg','DNs'}, ...
-        'VariableTypes', {'double','double','double','double','double','double','double'});
-
-    rng(42);
-    for jj = 1:numel(kRange_valid_c)
-        kk = kRange_valid_c(jj);
-        if size(pcs_c,1) < kk, continue; end
-        idx_tmp = kmeans(pcs_c, kk, 'Replicates',30,'MaxIter',400,'Display','off');
-        try SilMean_c = mean(silhouette(pcs_c, idx_tmp)); catch, SilMean_c = NaN; end
-        EC_ch_c  = evalclusters(pcs_c,'kmeans','CalinskiHarabasz','KList',kk);
-        EC_db_c  = evalclusters(pcs_c,'kmeans','DaviesBouldin','KList',kk);
-        EC_gap_c = evalclusters(pcs_c,'kmeans','gap','KList',kk);
-        % Distances inter/intra
-        D_c = pdist2(pcs_c, pcs_c);
-        intra_c = mean(arrayfun(@(cl) mean(D_c(idx_tmp==cl,idx_tmp==cl),'all','omitnan'), 1:kk));
-        inter_c = mean(arrayfun(@(cl) mean(D_c(idx_tmp==cl,idx_tmp~=cl),'all','omitnan'), 1:kk));
-        validity_c(jj,:) = {kk, EC_ch_c.CriterionValues, SilMean_c, EC_db_c.CriterionValues, EC_gap_c.CriterionValues, inter_c, intra_c};
+    % === 1. CALCUL DU WCSS (DÉMARRE À K=1) ===
+    kRange_wcss = 1:min(10, max(2, nCond-1)); 
+    wcss_v_c = zeros(size(kRange_wcss));
+    for kk = 1:numel(kRange_wcss)
+        k_tmp = kRange_wcss(kk);
+        [~, ~, sumD] = kmeans(pcs_c, k_tmp, 'Replicates', 10, 'MaxIter', 200, 'Display', 'off');
+        wcss_v_c(kk) = sum(sumD); 
     end
-    writetable(validity_c, fullfile(outdir, "B00_VALIDITY_INDEXES_"+cond+"_"+ts+".csv"));
 
-    % Sélection robuste de k (condition)
-    kRange_c = 2:min(10, max(2, nCond-1));
-    [sil_v_c,ch_v_c,db_v_c,gap_v_c,gap_th_c] = criteria_curves(pcs_c,kRange_c);
-    ari_mean_c = bootstrap_ari(pcs_c,kRange_c,80);
+    % === 2. SÉLECTION ROBUSTE DE K (APPEL FONCTION ORIGINALE) ===
+    % On utilise tes 5 arguments habituels pour éviter l'erreur "Too many output arguments"
+    [sil_v_c, ch_v_c, db_v_c, gap_v_c, gap_th_c] = criteria_curves(pcs_c, kRange_c);
+    ari_mean_c = bootstrap_ari(pcs_c, kRange_c, 80);
 
-    sil_n = rescale(sil_v_c,0,1);
-    ch_n  = rescale(ch_v_c ,0,1);
-    db_n  = 1 - rescale(db_v_c,0,1);
-    gap_n = rescale(gap_v_c,0,1);
-    ari_n = rescale(ari_mean_c,0,1);
+    % Calcul du vote (Pondération identique au Global)
+    sil_n = rescale(sil_v_c, 0, 1);
+    ch_n  = rescale(ch_v_c, 0, 1);
+    db_n  = 1 - rescale(db_v_c, 0, 1);
+    gap_n = rescale(gap_v_c, 0, 1);
+    ari_n = rescale(ari_mean_c, 0, 1);
+    score_c_vote = 0.30*sil_n + 0.20*ch_n + 0.20*db_n + 0.10*gap_n + 0.20*ari_n;
+    
+    [~, best_idx_c] = max(score_c_vote);
+    k_c = kRange_c(best_idx_c); 
 
-    score_c = 0.30*sil_n + 0.20*ch_n + 0.20*db_n + 0.10*gap_n + 0.20*ari_n;
-    [~,best_idx_c] = max(score_c);
-    k_c = kRange_c(best_idx_c);
+    % === 3. FIGURE DE SÉLECTION (DESIGN IDENTIQUE AU GLOBAL : tiledlayout 3x1) ===
+    fig_elbow_cond = figure('Color','w', 'Position', [100 100 800 850], 'Name', "Selection K - " + cond);
+    tiledlayout(3,1,'TileSpacing','compact','Padding','compact');
 
-    % --- Courbe du coude (WCSS) --- (corrigée pour la condition)
-    WCSS_vals_c = zeros(size(kRange_c));
-    for kk = 1:numel(kRange_c)
-        ktest = kRange_c(kk);
-        [idx_tmp, Ctmp] = kmeans(pcs_c, ktest, ...
-            'Replicates', 20, 'MaxIter', 300, 'Display', 'off');
-        d2 = sum((pcs_c - Ctmp(idx_tmp, :)).^2, 2);
-        WCSS_vals_c(kk) = sum(d2);
-    end
-    fig_elbow_c = figure('Color','w');
-    plot(kRange_c, WCSS_vals_c, '-o', 'LineWidth',1.5);
+    % 1) WCSS (Elbow)
+    nexttile;
+    plot(kRange_wcss, wcss_v_c, '-o', 'LineWidth', 1.6); grid on;
+    ylabel('WCSS');
+    title(sprintf('k-selection (%s): Elbow + Silhouette + Stability (ARI)', cond));
+    xlim([1 max(kRange_c)]);
+    hold on; xline(k_c, '--k', sprintf('k^*=%d', k_c), 'LabelVerticalAlignment', 'bottom');
+
+    % 2) Silhouette
+    nexttile;
+    plot(kRange_c, sil_v_c, '-o', 'LineWidth', 1.6); grid on;
+    ylabel('Mean silhouette');
+    xlim([min(kRange_c) max(kRange_c)]);
+    hold on; xline(k_c, '--k', 'HandleVisibility', 'off');
+
+    % 3) ARI bootstrap
+    nexttile;
+    plot(kRange_c, ari_mean_c, '-o', 'LineWidth', 1.6); grid on;
+    ylabel('ARI (bootstrap mean)');
     xlabel('Number of clusters (k)');
-    ylabel('Within-cluster sum of squares (WCSS)');
-    title(sprintf('Elbow method - %s', cond));
-    grid on;
-    exportgraphics(fig_elbow_c, fullfile(outdir, "B01_ElbowPlot_"+cond+"_"+ts+".png"), 'Resolution',300);
+    xlim([min(kRange_c) max(kRange_c)]);
+    hold on; xline(k_c, '--k', 'HandleVisibility', 'off');
 
-    % Figures critères (condition)
-    fig_kcrit_c = figure('Color','w');
-    tiledlayout(3,2,'TileSpacing','compact','Padding','compact');
-    nexttile; plot(kRange_c,sil_v_c,'-o'); grid on; title(sprintf('%s: Silhouette ↑',cond)); xlabel('k');
-    nexttile; plot(kRange_c,ch_v_c ,'-o'); grid on; title(sprintf('%s: CH ↑',cond)); xlabel('k');
-    nexttile; plot(kRange_c,db_v_c ,'-o'); grid on; title(sprintf('%s: DBI ↓',cond)); xlabel('k');
-    nexttile; plot(kRange_c,gap_v_c,'-o'); grid on; title(sprintf('%s: Gap ↑ (1-SE)',cond)); xlabel('k'); hold on; yline(gap_th_c,'k--','1-SE');
-    nexttile; plot(kRange_c,ari_mean_c,'-o'); grid on; title(sprintf('%s: ARI ↑',cond)); xlabel('k');
-    nexttile; plot(kRange_c,score_c,'-o'); hold on; plot(k_c, score_c(best_idx_c),'rp','MarkerFaceColor','r');
-    grid on; title(sprintf('%s: Score global (k*=%d, nPC=%d)',cond,k_c,size(pcs_c,2))); xlabel('k');
-    exportgraphics(fig_kcrit_c, fullfile(outdir, "B02_Kselection_"+cond+"_"+ts+".png"), 'Resolution',300);
+    exportgraphics(fig_elbow_cond, fullfile(outdir, "03a_Elbow_Sil_ARI_" + cond + "_" + ts + ".png"), 'Resolution', 300);
 
-    % Clustering final (condition)
-    [idxC, CcC_npc] = kmeans(pcs_c, k_c, 'Replicates',40,'MaxIter',400,'Display','off');
-    CcC_pc12 = CcC_npc(:,1:2);
+    % === 4. CLUSTERING FINAL & EXPORT POUR R ===
+    rng(42);
+    [idxC, CcC_npc] = kmeans(pcs_c, k_c, 'Replicates', 50, 'MaxIter', 500, 'Display', 'off');
+    CcC_pc12 = CcC_npc(:, 1:2);
 
-    % === EXPORT COMPLET POUR R (CONDITION : %s) ===
-    % On récupère les données brutes de la condition actuelle
-    dataRAW_c = dataMat(idxCond, :); 
-    
+    % Export CSV pour les médianes/IQR dans R (On garde Participant pour la jointure)
     FinalTable_Cond = [meta_c, table(idxC, 'VariableNames', {'ClusterID'}), array2table(dataRAW_c, 'VariableNames', allVars)];
-    
-    % Export CSV
-    out_R_cond = fullfile(outdir, "DATA_FOR_R_" + cond + "_" + ts + ".csv");
+    out_R_cond = fullfile(outdir, "DATA_FOR_STATS_R_" + cond + "_" + ts + ".csv");
     writetable(FinalTable_Cond, out_R_cond);
-    fprintf('✅ Export pour R (%s) : %s\n', cond, out_R_cond);
+    fprintf('✅ Condition %s : k=%d séléctionné. Export : %s\n', cond, k_c, out_R_cond);
 
-    % Scatter PC1–PC2 + gradient âge + contours
+    % === 5. VISUALISATION DES CLUSTERS (SCATTER PC1-PC2) ===
     figc = figure('Color','w'); hold on;
     scatter(pcs_c_viz(:,1), pcs_c_viz(:,2), 42, meta_c.AgeMonths/12, 'filled');
     colormap(parula); cb = colorbar; cb.Label.String = 'age (years)';
     xlabel(sprintf('PC1 (%.1f%%)', expl1)); ylabel(sprintf('PC2 (%.1f%%)', expl2));
-    title(sprintf('%s - PC1–PC2 - Clustering based on %d principal components, k=%d', cond, size(pcs_c,2), k_c)); grid on;
+    title(sprintf('%s - PC1–PC2 - Clustering (k=%d)', cond, k_c)); grid on;
 
     colsC = lines(k_c);
     for ic = 1:k_c
         pts = pcs_c_viz(idxC==ic,:);
         if size(pts,1) >= 3
             K = convhull(pts(:,1), pts(:,2));
-            plot(pts(K,1), pts(K,2), '-', 'Color', colsC(ic,:), 'LineWidth',1.5);
+            plot(pts(K,1), pts(K,2), '-', 'Color', colsC(ic,:), 'LineWidth', 1.5);
         end
     end
-    plot(CcC_pc12(:,1), CcC_pc12(:,2), 'kx', 'MarkerSize',12, 'LineWidth',2);
-    for ic=1:k_c
-        text(CcC_pc12(ic,1), CcC_pc12(ic,2), sprintf('  C%d',ic), ...
-            'FontWeight','bold','Color','k','VerticalAlignment','middle');
-    end
+    plot(CcC_pc12(:,1), CcC_pc12(:,2), 'kx', 'MarkerSize', 12, 'LineWidth', 2);
 
+    % Annotations d'âge sur le graphique
     AgeStats_c = annotate_age_on_clusters(gca, pcs_c_viz, idxC, CcC_pc12, meta_c.AgeMonths);
-    exportgraphics(figc, fullfile(outdir, "B03_PC1PC2_AgeGradient_"+cond+"_k"+k_c+"_"+ts+".png"), 'Resolution',300);
+    exportgraphics(figc, fullfile(outdir, "B03_PC1PC2_AgeGradient_"+cond+"_k"+k_c+"_"+ts+".png"), 'Resolution', 300);
 
-    % Profils moyens, Cohen's d, tests omnibus
-    [meanZ_c, meanRAW_c, cohenD_c, statsTable_c] = ...
-        cluster_profiles_and_stats(dataMat(idxCond,:), Xnorm_c, idxC, allVars);
+    % === 6. PROFILS, COHEN'S D & HEATMAPS ===
+    [meanZ_c, meanRAW_c, cohenD_c, statsTable_c] = cluster_profiles_and_stats(dataRAW_c, Xnorm_c, idxC, allVars);
 
-    % === version affichage sans unités pour la condition ===
-    allVars_disp_c = allVars;
-    for i = 1:numel(allVars_disp_c)
-        if strcmp(allVars_disp_c{i}, 'CV_Gait speed (m.s^{-1})')
-            allVars_disp_c{i} = 'CV_Stride speed';
-            continue;
-        end
-        allVars_disp_c{i} = regexprep(allVars_disp_c{i}, '\s*\([^)]*\)', '');
-        allVars_disp_c{i} = strtrim(regexprep(allVars_disp_c{i}, '\s+', ' '));
-    end
-
-    % Heatmap z-score
     fig_heat_c = figure('Color','w');
     heatmap_data_c = table2array(meanZ_c);
     clim_c = max(abs(heatmap_data_c(:)));
-    rowLabels_c = arrayfun(@(ic) ...
-        sprintf('C%d (n=%d, %.1f ans)', ic, sum(idxC==ic), AgeStats_c.AgeMonths_mean(ic)/12), ...
-        1:k_c, 'UniformOutput', false);
-    h_c = heatmap(allVars_disp_c, rowLabels_c, heatmap_data_c, ...
-        'Title', sprintf('Mean z-score profiles — %s (k=%d, nPC=%d)', cond, k_c, size(pcs_c,2)), ...
-        'XLabel','Spatiotemporal variables','YLabel','Clusters (taille, âge)', ...
+    rowLabels_c = arrayfun(@(ic) sprintf('C%d (n=%d, %.1f ans)', ic, sum(idxC==ic), AgeStats_c.AgeMonths_mean(ic)/12), 1:k_c, 'UniformOutput', false);
+    h_c = heatmap(allVars_disp, rowLabels_c, heatmap_data_c, ...
+        'Title', sprintf('Mean z-score profiles — %s (k=%d)', cond, k_c), ...
         'Colormap', blueyellow(256), 'ColorLimits', [-clim_c, clim_c]);
-    h_c.FontSize = 10; h_c.CellLabelFormat = '%.2f'; h_c.GridVisible = 'on';
-    exportgraphics(fig_heat_c, fullfile(outdir, "B04_Heatmap_Profils_"+cond+"_k"+k_c+"_"+ts+".png"), 'Resolution',300);
+    exportgraphics(fig_heat_c, fullfile(outdir, "B04_Heatmap_Profils_"+cond+"_k"+k_c+"_"+ts+".png"), 'Resolution', 300);
 
-    % Qualité & composition
-    [sil_each_c, CH_best_c, DB_best_c, GAP_best_c, EntTable_c] = ...
-        quality_and_composition(pcs_c, idxC, meta_c, k_c, ch_v_c, db_v_c, gap_v_c, kRange_c);
-    writetable( table((1:numel(sil_each_c))', sil_each_c, idxC, ...
-        'VariableNames', {'Obs','Silhouette','Cluster'}) , ...
-        fullfile(outdir,"B05_Silhouette_indiv_"+cond+"_"+ts+".csv") );
-    writetable(EntTable_c, fullfile(outdir,"B4_Qualite_Clusters_"+cond+"_"+ts+".csv"));
-    
-    % Exports CSV
+    % --- Sauvegardes CSV de traçabilité ---
     writetable(AgeStats_c, fullfile(outdir, "B5_Age_Stats_"+cond+"_"+ts+".csv"));
-    writetable(addvars(meanZ_c,(1:k_c)','Before',1,'NewVariableNames','ClusterID'), ...
-        fullfile(outdir, "B6_ProfilMoyen_zscore_"+cond+"_"+ts+".csv"), 'WriteRowNames',true);
-    writetable(addvars(meanRAW_c,(1:k_c)','Before',1,'NewVariableNames','ClusterID'), ...
-        fullfile(outdir, "B7_ProfilMoyen_unitesReelles_"+cond+"_"+ts+".csv"), 'WriteRowNames',true);
-    writetable(addvars(cohenD_c,(1:k_c)','Before',1,'NewVariableNames','ClusterID'), ...
-        fullfile(outdir, "B8_CohenD_"+cond+"_"+ts+".csv"), 'WriteRowNames',true);
-    writetable(statsTable_c, fullfile(outdir,"B9_Stats_omnibus_"+cond+"_"+ts+".csv"));
-
-    % Tests statistiques entre clusters (seulement si k=2)
-    if k_c == 2
-        fprintf('\n=== Tests statistiques entre clusters — %s (k=2) ===\n', cond);
-        cLabs = unique(idxC);
-        pvals_c = nan(1, numel(allVars));
-        d_cohen_c = nan(1, numel(allVars));
-        testType_c = strings(numel(allVars),1);
-        for v = 1:numel(allVars)
-            x1 = dataMat(idxCond, v); x1 = x1(idxC == cLabs(1));
-            x2 = dataMat(idxCond, v); x2 = x2(idxC == cLabs(2));
-            ok1 = ~isnan(x1); ok2 = ~isnan(x2); x1 = x1(ok1); x2 = x2(ok2);
-            if numel(x1) >= 3 && numel(x2) >= 3
-                norm1 = (lillietest((x1-mean(x1))/std(x1)) == 0);
-                norm2 = (lillietest((x2-mean(x2))/std(x2)) == 0);
-                if norm1 && norm2
-                    [~, p] = ttest2(x1, x2);
-                    testType_c(v) = "t-test";
-                else
-                    p = ranksum(x1, x2);
-                    testType_c(v) = "Mann-Whitney";
-                end
-                pvals_c(v) = p;
-                m1 = mean(x1,'omitnan'); m2 = mean(x2,'omitnan');
-                s1 = std(x1,'omitnan'); s2 = std(x2,'omitnan');
-                sp = sqrt(((numel(x1)-1)*s1^2 + (numel(x2)-1)*s2^2) / (numel(x1)+numel(x2)-2));
-                d_cohen_c(v) = (m1 - m2) / max(sp, eps);
-            end
-        end
-        nT = sum(~isnan(pvals_c));
-        p_bonf_c = pvals_c * max(nT,1);
-        p_bonf_c(p_bonf_c > 1) = 1;
-        Sig_c = repmat("ns", numel(pvals_c), 1);
-        Sig_c(p_bonf_c < 0.05) = "*";
-        Sig_c(p_bonf_c < 0.01) = "**";
-        Sig_c(p_bonf_c < 0.001) = "***";
-        StatsClusters_c = table(allVars_disp_c', testType_c, pvals_c', p_bonf_c', d_cohen_c', Sig_c, ...
-            'VariableNames', {'Variable','Test','p_value','p_Bonferroni','Cohens_d','Sig'});
-        disp(StatsClusters_c);
-        writetable(StatsClusters_c, fullfile(outdir, "B9b_ClusterComparison_"+cond+"_BONFERRONI_"+ts+".csv"));
-    end
-
-    % Résumé console
-    fprintf('\n=== QUALITE — %s ===\n', cond);
-    fprintf('nPC=%d | k*=%d | Sil=%.3f | CH=%.1f | DBI=%.3f | GAP=%.3f | ARI_boot=%.3f\n', ...
-        size(pcs_c,2), k_c, mean(sil_each_c,'omitnan'), CH_best_c, DB_best_c, GAP_best_c, ari_mean_c(kRange_c==k_c));
-    print_cluster_composition(meta_c, idxC, {cond});
-
-    Trace_c = table(meta_c.Participant, meta_c.Condition, meta_c.AgeMonths, meta_c.AgeGroup, idxC, pcs_c_viz(:,1), pcs_c_viz(:,2), ...
-        'VariableNames', {'Participant','Condition','AgeMonths','AgeGroup','Cluster','PC1','PC2'});
+    writetable(statsTable_c, fullfile(outdir, "B9_Stats_omnibus_"+cond+"_"+ts+".csv"));
+    Trace_c = table(meta_c.Participant, meta_c.Condition, meta_c.AgeMonths, meta_c.AgeGroup, idxC, 'VariableNames', {'Participant','Condition','AgeMonths','AgeGroup','Cluster'});
     writetable(Trace_c, fullfile(outdir, "B10_ClusterTraceability_"+cond+"_"+ts+".csv"));
 end
-
-disp("✅ Analyses GLOBAL + PAR CONDITION terminées. Exports : " + outdir);
 
 %% ===================== FONCTIONS LOCALES =====================
 

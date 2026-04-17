@@ -15,7 +15,6 @@ library(fmsb)
 
 
 
-
 # 2. Importation
 df_clust <- read.csv("DATA_FOR_R_GLOBAL_20260123_1409.csv", sep = ";", check.names = FALSE)
 df_meta <- read.csv(file.choose(), sep = ";", check.names = FALSE)
@@ -32,6 +31,76 @@ df_meta_clean <- df_meta %>%
   select(Participant, AgeMonths, Sex) 
 
 df <- left_join(df_clust, df_meta_clean, by = "Participant")
+
+# -----------------------------------------------------------
+# 3.bis AJOUT DE LA VITESSE DE MARCHE BRUTE DEPUIS ACP_Clustering_DATA
+# + TEST MANN-WHITNEY ENTRE C1 ET C2
+# -----------------------------------------------------------
+
+# 1. Charger le fichier ACP_Clustering_DATA
+df_acp <- read.csv(
+  "C:/Users/silve/Desktop/DOCTORAT/UNIV MONTREAL/TRAVAUX-THESE/Surfaces_Irregulieres/Datas/Script/gaitAnalysisGUI/result/Statistical_Analysis_LMM/Prepared_Data/ACP_Clustering_DATA.csv",
+  sep = ";",
+  check.names = FALSE
+)
+
+View(df_acp)
+
+# 2. Harmoniser le nom de la colonne de surface pour la jointure
+# Ici, on suppose que df contient "Condition" et df_acp contient "Surface"
+# et que les valeurs sont déjà identiques (ex. Plat / Medium / High)
+
+df <- df %>%
+  mutate(Surface_join = Condition)
+
+df_acp <- df_acp %>%
+  mutate(Surface_join = Surface)
+
+# 3. Extraire la vitesse brute
+# Vérifie bien que le nom de colonne est exactement celui-ci dans ton fichier
+df_speed <- df_acp %>%
+  select(Participant, Surface_join, `Mean_Gait speed (m.s^{-1})`) %>%
+  rename(GaitSpeed_abs = `Mean_Gait speed (m.s^{-1})`)
+
+# 4. Jointure avec le dataframe principal
+df <- df %>%
+  left_join(df_speed, by = c("Participant", "Surface_join"))
+
+# Vérification
+cat("\nNombre de lignes avec vitesse brute retrouvée :", sum(!is.na(df$GaitSpeed_abs)), "/", nrow(df), "\n")
+
+# 5. Test Mann-Whitney entre clusters sur la vitesse brute
+df_speed_test <- df %>%
+  select(ClusterID, GaitSpeed_abs) %>%
+  filter(!is.na(GaitSpeed_abs))
+
+speed_wilcox <- df_speed_test %>%
+  wilcox_test(GaitSpeed_abs ~ ClusterID) %>%
+  add_significance("p")
+
+speed_effsize <- df_speed_test %>%
+  wilcox_effsize(GaitSpeed_abs ~ ClusterID)
+
+# 6. Résumé console
+cat("\n=== MANN-WHITNEY : VITESSE DE MARCHE BRUTE ENTRE CLUSTERS ===\n")
+cat("W =", speed_wilcox$statistic, "\n")
+cat("p =", speed_wilcox$p, " (", speed_wilcox$p.signif, ")\n")
+cat("rrb =", round(speed_effsize$effsize, 3), "(", speed_effsize$magnitude, ")\n")
+
+# 7. Médiane [IQR] par cluster pour la vitesse brute
+speed_summary <- df_speed_test %>%
+  group_by(ClusterID) %>%
+  summarise(
+    med = median(GaitSpeed_abs, na.rm = TRUE),
+    q25 = quantile(GaitSpeed_abs, 0.25, na.rm = TRUE),
+    q75 = quantile(GaitSpeed_abs, 0.75, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    Summary = paste0(round(med, 2), " [", round(q25, 2), " - ", round(q75, 2), "]")
+  )
+
+print(speed_summary)
 
 
 # 3.1 Préparation des variables
@@ -108,7 +177,7 @@ for (v in vars_marche) {
 # 4.1. Sélection automatique des variables
 vars_exclude <- c("Participant", "ClusterID", "Condition", "Sex", "AgeMonths", 
                   "AgeGroup", "AgeGroup.x", "AgeGroup.y", "AgeMonths.x", 
-                  "AgeMonths.y", "Sex_EN", "AgeGroup_EN", "Condition_EN")
+                  "Sex_EN", "AgeGroup_EN", "Condition_EN", "Surface_join")
 
 vars_gait <- colnames(df)[!colnames(df) %in% vars_exclude]
 
@@ -139,12 +208,35 @@ summary_formatted <- summary_table %>%
   pivot_wider(names_from = ClusterID, values_from = Med_IQR, names_prefix = "Cluster_") %>%
   rename(Variable = CleanVar)
 
-# 4.4 & 4.5. Tests de Wilcoxon avec Sécurité Anti-Erreur
+
+# 4.3.bis TEST DE NORMALITÉ (Shapiro-Wilk)
+shapiro_results <- df %>%
+  select(ClusterID, all_of(vars_gait)) %>%
+  pivot_longer(cols = -ClusterID, names_to = "Variable", values_to = "Value") %>%
+  group_by(Variable, ClusterID) %>%
+  # On ne teste que si on a assez d'observations (n > 3)
+  filter(n() >= 3) %>%
+  shapiro_test(Value) %>%
+  # Un p < 0.05 signifie que la distribution N'EST PAS normale
+  mutate(is_normal = p > 0.05) 
+
+# Visualisation rapide des variables problématiques
+non_normal_vars <- shapiro_results %>% filter(is_normal == FALSE)
+print(non_normal_vars)
+
+# 4.4 & 4.5. Tests de Wilcoxon 
 stats_tests_clean <- df %>%
   select(ClusterID, any_of("AgeMonths.y"), all_of(vars_gait)) %>%
   pivot_longer(cols = -ClusterID, names_to = "Variable", values_to = "Value") %>%
   group_by(Variable) %>%
   wilcox_test(Value ~ ClusterID)
+
+# Effect size (r de rang biserial) pour chaque variable
+effect_sizes <- df %>%
+  select(ClusterID, any_of("AgeMonths.y"), all_of(vars_gait)) %>%
+  pivot_longer(cols = -ClusterID, names_to = "Variable", values_to = "Value") %>%
+  group_by(Variable) %>%
+  wilcox_effsize(Value ~ ClusterID)   # donne r (rang biserial) + magnitude
 
 # SÉCURITÉ : AJOUT DES ÉTOILES SI ELLES MANQUENT ---
 # Si le test n'a pas généré p.signif, on le crée manuellement
@@ -162,9 +254,26 @@ stats_tests_clean <- stats_tests_clean %>%
     Variable = dplyr::recode(Variable, "AgeMonths.y" = "Age (months)")
   )
 
+# NETTOYAGE DES NOMS sur effect_sizes (identique aux autres)
+effect_sizes <- effect_sizes %>%
+  mutate(
+    Variable = gsub("^Mean_", "", Variable),
+    Variable = if_else(grepl("Norm Gait Speed", Variable, ignore.case = TRUE), "Norm Gait Speed (ua)", Variable),
+    Variable = if_else(grepl("^CV_", Variable), paste0(gsub("^CV_", "C.V. ", gsub(" \\(.*\\)", "", Variable)), " (%)"), Variable),
+    Variable = if_else(grepl("^SI_", Variable), gsub("^SI_", "S.I. ", gsub(" \\(.*\\)", "", Variable)), Variable),
+    Variable = dplyr::recode(Variable, "AgeMonths.y" = "Age (months)")
+  )
+
 # FUSION SÉCURISÉE ---
 # On vérifie quelles colonnes existent réellement pour ne pas faire planter select()
-cols_disponibles <- intersect(c("Variable", "p", "p.signif"), colnames(stats_tests_clean))
+# Jointure effect size sur les tests
+stats_tests_clean <- left_join(stats_tests_clean, 
+                               effect_sizes %>% select(Variable, effsize, magnitude),
+                               by = "Variable")
+
+# FUSION SÉCURISÉE ---
+cols_disponibles <- intersect(c("Variable", "p", "p.signif", "effsize", "magnitude"), 
+                              colnames(stats_tests_clean))
 
 final_stats_table <- left_join(summary_formatted, 
                                stats_tests_clean %>% select(all_of(cols_disponibles)), 
@@ -189,7 +298,7 @@ tt <- ttheme_default(
 g_table <- tableGrob(table_to_export, rows = NULL, theme = tt)
 
 # 5) Ajout des annotations en bas du tableau
-notes <- textGrob("Values are Median [Interquartile Range]. P-values calculated using Wilcoxon rank-sum test.\nC.V. = Coefficient of Variation (%); S.I. = Symmetry Index; (ua) = arbitrary units.", 
+notes <- textGrob("Values are Median [Interquartile Range]. P-values calculated using Wilcoxon rank-sum test.\nr = rank-biserial correlation (effect size): small ≥ 0.1, medium ≥ 0.3, large ≥ 0.5.\nC.V. = Coefficient of Variation (%); S.I. = Symmetry Index; (ua) = arbitrary units.", 
                   x = 0, hjust = 0, vjust = 1, 
                   gp = gpar(fontsize = 8, fontitalic = TRUE))
 
@@ -220,6 +329,31 @@ ggsave("Table_Stats_Descriptives.pdf",
 print(paste("Le tableau a été exporté. Hauteur utilisée :", round(hauteur_calculee, 1), "cm"))
 
 
+# 4.7 TEST MANN-WHITNEY SUR L'ÂGE EN MOIS
+
+# Identifier le bon nom de la colonne âge dans df
+age_col <- intersect(c("AgeMonths", "AgeMonths.y", "AgeMonths.x"), colnames(df))[1]
+cat("Colonne âge utilisée :", age_col, "\n")
+
+# Créer un df temporaire avec le bon nom
+df_age <- df %>%
+  select(ClusterID, all_of(age_col)) %>%
+  setNames(c("ClusterID", "AgeMonths"))
+
+# Test de Wilcoxon
+age_wilcox <- df_age %>%
+  wilcox_test(AgeMonths ~ ClusterID) %>%
+  add_significance("p")
+
+# Effect size (r rang biserial)
+age_effsize <- df_age %>%
+  wilcox_effsize(AgeMonths ~ ClusterID)
+
+# Résumé
+cat("\n=== MANN-WHITNEY : ÂGE EN MOIS ENTRE CLUSTERS ===\n")
+cat("W =", age_wilcox$statistic, "\n")
+cat("p =", age_wilcox$p, " (", age_wilcox$p.signif, ")\n")
+cat("r =", round(age_effsize$effsize, 3), "(", age_effsize$magnitude, ")\n")
 
 
 # 5.TEST CHI² ---
@@ -227,7 +361,7 @@ tab_sexe <- table(df$Sex, df$ClusterID)
 chi2_sexe <- chisq_test(tab_sexe)
 
 tab_age <- table(df$AgeGroup, df$ClusterID)
-chi2_age <- chisq_test(tab_age)
+fisher_age <- fisher_test(tab_age)  # Fisher car effectifs théoriques < 5 (Ado et Adults dans C2)
 
 tab_surface <- table(df$Condition, df$ClusterID)
 chi2_surface <- chisq_test(tab_surface)
@@ -242,7 +376,7 @@ table(df$Sex, df$ClusterID)
 table(df$Condition, df$ClusterID)
 
 print("--- RÉSULTATS CHI² ---")
-print(chi2_age)
+print(fisher_age)
 print(chi2_sexe)
 print(chi2_surface)
 
@@ -250,14 +384,14 @@ print(chi2_surface)
 # Regrouper les résultats des tests Chi² dans un seul dataframe
 # On extrait le nom de la variable, la statistique, le ddl (n) et la p-value
 chi2_results <- bind_rows(
-  mutate(chi2_age, Variable = "Age Group"),
-  mutate(chi2_sexe, Variable = "Sex"),
-  mutate(chi2_surface, Variable = "Surface")
+  # Fisher pour Age Group (pas de statistic ni df)
+  fisher_age %>% mutate(Variable = "Age Group", statistic = NA, df = NA, n = nrow(df)),
+  # Chi² pour Sex et Surface
+  chi2_sexe    %>% mutate(Variable = "Sex"),
+  chi2_surface %>% mutate(Variable = "Surface")
 ) %>%
   select(Variable, n, statistic, df, p) %>%
-  # Ajouter les étoiles de significativité
   add_significance() %>%
-  # Formater la p-value pour l'affichage
   mutate(p = format.pval(p, digits = 2, eps = 0.001))
 
 # Création de l'objet graphique (Tableau)
@@ -282,8 +416,6 @@ grid.draw(g_chi2)
 dev.off()
 
 print("Le tableau des résultats Chi² a été exporté.")
-
-
 
 
 # 6. Observer les migrations des participants entre les 2 clusters
@@ -429,10 +561,10 @@ plot_migration <- ggplot(df_flux, aes(y = n, axis1 = Plat, axis2 = High)) +
   # Configuration des couleurs et de la légende
   scale_fill_manual(
     values = c(
-      "Young Children" = "#3498db", # Bleu
-      "Children"       = "#e67e22", # Orange
-      "Adolescents"    = "#27ae60", # Vert
-      "Adults"         = "#8e44ad"  # Violet
+      "Young Children" = "blue", # Bleu
+      "Children"       = "chocolate3", # Orange
+      "Adolescents"    = "darkred", # Vert
+      "Adults"         = "purple"  # Violet
     ),
     labels = labels_avec_perc
   ) +
@@ -790,7 +922,7 @@ create_cluster_radar <- function(df_full, vars, labels) {
         x = x_pos,
         y = y_pos,
         labels = val,
-        cex = 0.5,
+        cex = 1.2,
         col = "grey20",
         font = 1
       )
@@ -865,6 +997,15 @@ dev.off()
 
 # 7.2) Export PNG haute qualité
 png(filename = "Radar_Plot_Clusters.png", width = 5200, height = 5200, res = 600, type = "cairo")
+
+tiff(
+  filename = "Radar_Plot_Clusters.tiff",
+  width = 12,
+  height = 12,
+  units = "in",
+  res = 600,
+  compression = "lzw"
+)
 
 op <- par(no.readonly = TRUE)
 

@@ -2,7 +2,6 @@
 %  GVI (Gouelle 2013) — TOUTES SURFACES (Plat / Medium / High)
 %  - 1 GVI par individu ET par surface (donc 3 scores si 3 surfaces)
 %  - Référence FIXE = Adultes (Plat) définis dans ParticipantGroup.m
-%  - Standardisation, PCA, poids, normalisation g -> TOUJOURS sur Adultes Plat
 %
 %  Entrées .mat: variable 'c' avec c.resultsAll.kin.Left/Right (struct)
 %    où chaque champ spatio-temporel est un vecteur (1 valeur = 1 cycle)
@@ -59,6 +58,19 @@ paramList = { ...
     'DoubleSupportTime', ...
     'StrideVelocity'};
 
+% Basé sur Gouelle et al. 2013
+cn18 = [
+0.797 0.728 ... % StepLength (Mean, SD)
+0.699 0.728 ... % StrideLength
+0.930 0.817 ... % StepTime
+0.901 0.836 ... % StrideTime
+0.899 0.882 ... % Swing
+0.919 0.852 ... % Stance
+0.902 0.860 ... % Single
+0.805 0.687 ... % Double
+0.890 0.889];   % Velocity
+
+cn = [cn18 cn18];
 nParam = numel(paramList);
 nAlt  = 2*nParam;        % 18
 nCols = 2*nAlt;          % 36 = Left(18) + Right(18)
@@ -169,52 +181,42 @@ fprintf('Lignes valides (participant×surface): %d\n', numel(IDs));
 %% === RÉFÉRENCE = Adultes Plat ===
 idxRef = (AgeGrp=="Adultes") & (Surface=="Plat") & ismember(IDs, refAdults);
 nRef = sum(idxRef);
-fprintf('Adultes référence (Plat): %d lignes\n', nRef);
+fprintf(['Adultes référence (Plat): %d lignes\n'], nRef);
 if nRef < 8
     warning('Référence Adultes faible (n=%d) -> prudence.', nRef);
 end
 
-%% === STANDARDISATION SUR LA RÉFÉRENCE (Adultes Plat) ===
-muRef = mean(X(idxRef,:), 'omitnan');
-sdRef = std(X(idxRef,:), 0, 'omitnan');
-sdRef(~isfinite(sdRef) | sdRef < 1e-12) = 1;   % éviter division par 0
-Xz = (X - muRef) ./ sdRef;
-
-%% === PCA SUR LA RÉFÉRENCE (Adultes Plat) ===
-[coeffRef, ~, ~, ~, explainedRef] = pca(Xz(idxRef,:), 'Rows','complete');
-fprintf('PC1 (Adultes Plat) variance expliquée: %.1f%%\n', explainedRef(1));
-
-% Projeter tous les sujets sur les axes adultes (PC1)
-pc1_all = Xz * coeffRef(:,1);
-
-%% === POIDS (corrélation variable vs PC1) SUR LA RÉFÉRENCE ===
-w = nan(1,size(Xz,2));
-for j = 1:size(Xz,2)
-    w(j) = corr(Xz(idxRef,j), pc1_all(idxRef), 'Rows','pairwise');
-end
-w = abs(w(:))';                    % poids positifs
-w(~isfinite(w)) = 0;
-
 %% === SCORE s, DISTANCE, LOG, NORMALISATION, GVI ===
-% Score s (somme pondérée des variables standardisées)
-s = sum(Xz .* w, 2, 'omitnan');
 
-% Distance à la référence sur le même score s
-sRef_mu = mean(s(idxRef), 'omitnan');
-d = abs(s - sRef_mu);
+X_L = X(:,1:18);
+X_R = X(:,19:36);
 
-% log-distance
+% Score s par jambe
+sL = sum(X_L .* cn18, 2, 'omitnan');
+sR = sum(X_R .* cn18, 2, 'omitnan');
+
+% Fusion des deux jambes AVANT log-distance
+s_mean = (sL + sR) / 2;
+
+% Référence Adultes Plat
+s_ref = mean(s_mean(idxRef), 'omitnan');
+
+% Distance
+d = abs(s_mean - s_ref);
+
+% Log-distance
 g = log(d + 1e-12);
 
-% z-score du log-distance basé sur la référence
-gRef_mu = mean(g(idxRef), 'omitnan');
-gRef_sd = std(g(idxRef), 0, 'omitnan');
-if ~isfinite(gRef_sd) || gRef_sd < 1e-12; gRef_sd = 1; end
+% Normalisation basée sur Adultes Plat
+g_mu = mean(g(idxRef),'omitnan');
+g_sd = std(g(idxRef),0,'omitnan');
 
-z = (g - gRef_mu) ./ gRef_sd;
+if ~isfinite(g_sd) || g_sd < 1e-12
+    g_sd = 1e-12;
+end
 
 % GVI final
-GVI = 100 - 10*z;
+GVI = 100 - 10*((g - g_mu)/g_sd);
 
 %% === QC ADULTES PLAT (doit être ~100 ± 10) ===
 fprintf('QC Adultes Plat GVI: mean=%.2f | sd=%.2f\n', ...
@@ -223,8 +225,10 @@ fprintf('QC Adultes Plat GVI: mean=%.2f | sd=%.2f\n', ...
 %% === EXPORTS ===
 
 % --- Export individuel (inchangé) ---
-Tind = table(IDs, AgeGrp, Surface, GVI, nCyclesL_all, nCyclesR_all, s, d, g, ...
-    'VariableNames', {'Participant','AgeGroup','Surface','GVI','nCyclesLeft','nCyclesRight','s','d_to_ref','log_d'});
+Tind = table(IDs, AgeGrp, Surface, ...
+    GVI, ...
+    nCyclesL_all, nCyclesR_all, ...
+    'VariableNames', {'Participant','AgeGroup','Surface','GVI','nCyclesLeft','nCyclesRight'});
 
 writetable(Tind, fullfile(outdir, sprintf('GVI_AllSurfaces_Individual_%s.csv', ts)));
 

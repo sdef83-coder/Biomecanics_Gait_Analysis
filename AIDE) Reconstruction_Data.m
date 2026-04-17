@@ -6,7 +6,7 @@ addpath(genpath('C:\Users\silve\Desktop\DOCTORAT\UNIV MONTREAL\TRAVAUX-THESE\Sur
 
 %% modif ou ajout de pistes cinématiques de marqueurs
 
-acq=btkReadAcquisition('CTL_67_High_05.c3d'); % ouverture du fichier C3D
+acq=btkReadAcquisition('CTL_67_Plat_10.c3d'); % ouverture du fichier C3D
 
 markers=btkGetMarkers(acq); % extraction de la cinematique des marqueurs
 
@@ -35,9 +35,9 @@ valeurs(:,3)=values3(:,3); % pour troisième colonne le vecteur selon z de NOM_M
 
 %% ENREGISTREMENT DES DONNEES
 
-btkWriteAcquisition(acq,'CTL_67_High_05_NEW.c3d'); % création du nouveau fichier C3D. 
+btkWriteAcquisition(acq,'CTL_67_Plat_10_NEW.c3d'); % création du nouveau fichier C3D. 
 
 %% verfication 
-acq1=btkReadAcquisition('CTL_67_High_05_NEW.c3d'); % ouverture du fichier C3D
+acq1=btkReadAcquisition('CTL_67_High_07_NEW.c3d'); % ouverture du fichier C3D
 markers1=btkGetMarkers(acq1); % extraction de la cinematique des marqueurs
 

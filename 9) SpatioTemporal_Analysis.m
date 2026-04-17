@@ -555,7 +555,7 @@ for g = 1:length(groupList)
         fprintf('%s: %d participants\n', gName, participantCount);
     end
 end
-
+%%
 % Sauvegarder la structure finale
 save(fullfile(save_path, 'SpatioTemporalDATA.mat'), 'SpatioTemporalDATA');
 
