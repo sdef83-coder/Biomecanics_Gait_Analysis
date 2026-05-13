@@ -8,7 +8,9 @@
 #   C. Caractérisation âge + sexe par groupe (Kruskal-Wallis + Fisher)
 #   D. Sous-analyse migrants : Early vs Late (Medium vs High)
 #   E. Comparaison d'âge Early vs Late (Wilcoxon)
-#   F. Exports CSV, PNG, PDF
+#   F. Visualisation Early vs Late
+#   G. Construire un panel des 15 variables
+#   H. Tableau descriptif des varaibles pour tous les groupes
 # ============================================================
 
 library(dplyr)
@@ -20,6 +22,7 @@ library(gt)
 library(rstatix)
 library(rcompanion)
 library(patchwork)
+library(ggpubr)
 
 setwd("C:/Users/silve/Desktop/DOCTORAT/UNIV MONTREAL/TRAVAUX-THESE/Surfaces_Irregulieres/Datas/Script/gaitAnalysisGUI/result/Fig/Clustering")
 
@@ -390,6 +393,32 @@ dunn_age_groups <- df_groups_comp %>%
 
 print(dunn_age_groups)
 
+# ============================================================
+# ANNOTATIONS STATISTIQUES POUR LE BOXPLOT DES 4 GROUPES
+# ============================================================
+
+stat_groups <- dunn_age_groups %>%
+  filter(p.adj < 0.05) %>%
+  mutate(
+    group1 = factor(group1, levels = levels(df_groups_comp$Group)),
+    group2 = factor(group2, levels = levels(df_groups_comp$Group)),
+    label = case_when(
+      p.adj < 0.001 ~ "***",
+      p.adj < 0.01  ~ "**",
+      p.adj < 0.05  ~ "*",
+      TRUE          ~ "ns"
+    )
+  )
+
+y_max_groups <- max(df_groups_comp$AgeMonths, na.rm = TRUE)
+
+stat_groups <- stat_groups %>%
+  mutate(
+    y.position = y_max_groups + seq(10, by = 15, length.out = n())
+  )
+
+print(stat_groups)
+
 # Export CSV
 write_csv(as.data.frame(kw_age_groups), "Kruskal_Age_Groups.csv")
 write_csv(as.data.frame(kw_age_groups_effsize), "KruskalEffsize_Age_Groups.csv")
@@ -408,10 +437,10 @@ print(cramers_v_groups)
 # ============================================================
 
 cols_groups <- c(
-"Stable C1"       = "#2C7FB8",
-"Migrants C1->C2" = "#e67e22",
-"Stable C2"       = "#31A354",
-"Transient"       = "#9E9E9E"
+  "Stable C1"       = "#2C7FB8",
+  "Migrants C1->C2" = "#e67e22",
+  "Stable C2"       = "#31A354",
+  "Transient"       = "#9E9E9E"
 )
 
 df_all$Group <- factor(
@@ -420,16 +449,32 @@ df_all$Group <- factor(
 )
 
 # Boxplot âge
-p_age_groups <- ggplot(df_all, aes(x = Group, y = AgeMonths, fill = Group)) +
+p_age_groups <- ggplot(df_groups_comp, aes(x = Group, y = AgeMonths, fill = Group)) +
   geom_boxplot(alpha = 0.7, outlier.shape = NA, color = "black") +
   geom_jitter(width = 0.2, alpha = 0.4, size = 1.5, color = "black") +
   scale_fill_manual(values = cols_groups) +
   labs(title = "Age by group", x = NULL, y = "Age (months)") +
-  theme_minimal() +
-  theme(plot.title = element_text(hjust = 0.5, face = "bold", size = 12),
-        legend.position = "none",
-        axis.text.x = element_text(angle = 15, hjust = 1),
-        panel.grid.major.x = element_blank())
+  stat_pvalue_manual(
+    stat_groups,
+    label = "label",
+    xmin = "group1",
+    xmax = "group2",
+    y.position = "y.position",
+    tip.length = 0.01,
+    bracket.size = 0.6,
+    size = 5,
+    hide.ns = TRUE
+  ) +
+  expand_limits(y = max(stat_groups$y.position, na.rm = TRUE) + 10) +
+  coord_cartesian(clip = "off") +
+  theme_minimal(base_size = 16) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 12),
+    legend.position = "none",
+    axis.text.x = element_text(angle = 15, hjust = 1),
+    panel.grid.major.x = element_blank(),
+    plot.margin = margin(10, 10, 20, 10)
+  )
 
 # Barplot sexe
 sex_summary_groups <- df_all %>%
@@ -539,6 +584,29 @@ wilcox_age_earlylate <- wilcox_test(
 
 print(wilcox_age_earlylate)
 
+# ============================================================
+# ANNOTATION STATISTIQUE POUR EARLY vs LATE
+# ============================================================
+
+stat_earlylate <- wilcox_age_earlylate %>%
+  mutate(
+    p.signif = case_when(
+      p <= 0.001  ~ "***",
+      p <= 0.01   ~ "**",
+      p <= 0.05   ~ "*",
+      TRUE        ~ "ns"
+    )
+  )
+
+y_max_earlylate <- max(df_migrants_compare$AgeMonths, na.rm = TRUE)
+
+stat_earlylate <- stat_earlylate %>%
+  mutate(
+    y.position = y_max_earlylate + 10
+  )
+
+print(stat_earlylate)
+
 # Taille d'effet : rank-biserial correlation
 wilcox_effsize_earlylate <- wilcox_effsize(
   df_migrants_compare,
@@ -561,7 +629,7 @@ cols_migrant <- c(
 )
 
 p_age_migrant_type <- ggplot(
-  df_migrants %>% filter(Trajectory %in% c("Early Migrant","Late Migrant")),
+  df_migrants_compare,
   aes(x = Trajectory, y = AgeMonths, fill = Trajectory)
 ) +
   geom_boxplot(alpha = 0.7, outlier.shape = NA, color = "black") +
@@ -573,11 +641,27 @@ p_age_migrant_type <- ggplot(
     x        = NULL,
     y        = "Age (months)"
   ) +
-  theme_minimal() +
-  theme(plot.title    = element_text(hjust = 0.5, face = "bold", size = 12),
-        plot.subtitle = element_text(hjust = 0.5, size = 10, color = "grey40"),
-        legend.position = "none",
-        panel.grid.major.x = element_blank())
+  stat_pvalue_manual(
+    stat_earlylate,
+    label = "p.signif",
+    xmin = "group1",
+    xmax = "group2",
+    y.position = "y.position",
+    tip.length = 0.01,
+    bracket.size = 0.6,
+    size = 5,
+    hide.ns = TRUE
+  ) +
+  expand_limits(y = max(stat_earlylate$y.position) + 10) +
+  coord_cartesian(clip = "off") +
+  theme_minimal(base_size = 16) +
+  theme(
+    plot.title    = element_text(hjust = 0.5, face = "bold", size = 12),
+    plot.subtitle = element_text(hjust = 0.5, size = 10, color = "grey40"),
+    legend.position = "none",
+    panel.grid.major.x = element_blank(),
+    plot.margin = margin(10, 10, 10, 10)
+  )
 
 print(p_age_migrant_type)
 
@@ -592,6 +676,269 @@ ggsave(
   compression = "lzw"
 )
 
+# ============================================================
+# G. PANEL DES 15 VARIABLES SELON SURFACE ET TRAJECTOIRE
+#     3 colonnes × 5 lignes
+# ============================================================
+
+# --- 1. Liste des 15 variables étudiées ---
+variables_15 <- c(
+  "Mean_Norm Gait Speed (m.s^{-1})",
+  "Mean_Norm Step length (ua)",
+  "Mean_Norm WR (ua)",
+  "Mean_Double support time (%)",
+  "Mean_Norm Cadence (ua)",
+  "Mean_COM SPARC Magnitude (ua)",
+  "Mean_Norm StepWidth (ua)",
+  "Mean_MoS ML HS (%L0)",
+  "Mean_MoS AP HS (%L0)",
+  "SI_Stride length (m)",
+  "SI_Double support time (%)",
+  "SI_StepWidth (cm)",
+  "CV_Norm StepWidth (ua)",
+  "Mean_GVI (ua)",
+  "CV_Gait speed (m.s^{-1})"
+)
+
+
+variable_labels <- c(
+  "Mean_Norm Gait Speed (m.s^{-1})" = "Norm Gait Speed (au)",
+  "Mean_Norm Step length (ua)"      = "Norm Step Length (au)",
+  "Mean_Norm WR (ua)"               = "Norm WR (au)",
+  "Mean_Double support time (%)"    = "Double support time (%)",
+  "Mean_Norm Cadence (ua)"          = "Norm Cadence (au)",
+  "Mean_COM SPARC Magnitude (ua)"   = "SPARC (au)",
+  "Mean_Norm StepWidth (ua)"        = "Norm StepWidth (au)",
+  "Mean_MoS ML HS (%L0)"            = "MoS ML (%L0)",
+  "Mean_MoS AP HS (%L0)"            = "MoS AP (%L0)",
+  "SI_Stride length (m)"            = "S.I. Stride length (%)",
+  "SI_Double support time (%)"      = "S.I. Double support time (%)",
+  "SI_StepWidth (cm)"               = "S.I. StepWidth (%)",
+  "CV_Norm StepWidth (ua)"          = "C.V. Norm StepWidth (%)",
+  "Mean_GVI (ua)"                   = "GVI (au)",
+  "CV_Gait speed (m.s^{-1})"        = "C.V. Gait speed (%)"
+)
+
+# --- 2. Vérification que les variables existent bien dans df_clust ---
+missing_vars <- setdiff(variables_15, colnames(df_clust))
+
+if (length(missing_vars) > 0) {
+  stop(
+    paste0(
+      "Les variables suivantes sont absentes de df_clust :\n",
+      paste(missing_vars, collapse = "\n")
+    )
+  )
+}
+
+# --- 3. Ordre des groupes à afficher ---
+trajectory_order <- c(
+  "Stable C1",
+  "Late Migrant",
+  "Early Migrant",
+  "Transient",
+  "Stable C2"
+)
+
+# --- 4. Couleurs des groupes ---
+cols_trajectory <- c(
+  "Stable C1"     = "#2C7FB8",
+  "Late Migrant"  = "darkred",
+  "Early Migrant" = "#FDB863",
+  "Transient"     = "#9E9E9E",
+  "Stable C2"     = "#31A354"
+)
+
+# --- 5. Préparation du tableau long ---
+df_panel_15 <- df_clust %>%
+  filter(Condition %in% c("Plat", "Medium", "High")) %>%
+  left_join(
+    df_all %>% select(Participant, Trajectory),
+    by = "Participant"
+  ) %>%
+  mutate(
+    Surface = case_when(
+      Condition == "Plat"   ~ "Even",
+      Condition == "Medium" ~ "Medium",
+      Condition == "High"   ~ "High",
+      TRUE ~ as.character(Condition)
+    ),
+    Surface = factor(Surface, levels = c("Even", "Medium", "High")),
+    Trajectory = factor(Trajectory, levels = trajectory_order)
+  ) %>%
+  pivot_longer(
+    cols = all_of(variables_15),
+    names_to = "Variable",
+    values_to = "Value"
+  ) %>%
+  mutate(
+    Variable = factor(Variable, levels = variables_15)
+  ) %>%
+  filter(!is.na(Trajectory), !is.na(Value))
+
+# --- 6. Panel principal ---
+p_panel_15 <- ggplot(
+  df_panel_15,
+  aes(x = Surface, y = Value, fill = Trajectory)
+) +
+  geom_boxplot(
+    alpha = 0.85,
+    outlier.shape = NA,
+    color = "black",
+    linewidth = 0.35,
+    width = 0.65,
+    position = position_dodge(width = 0.80)   
+  ) +
+  geom_jitter(
+    position = position_jitterdodge(
+      jitter.width = 0.08,
+      dodge.width = 0.80                       
+    ),
+    alpha = 0.75,
+    size = 0.55,
+    color = "black"
+  ) +
+  facet_wrap(
+    ~ Variable,
+    ncol = 3,
+    scales = "free_y",
+    labeller = labeller(Variable = variable_labels)
+  ) +
+  scale_fill_manual(values = cols_trajectory, drop = FALSE) +
+  labs(
+    title = NULL,
+    x = NULL,
+    y = NULL,
+    fill = "Trajectory"
+  ) +
+  theme_classic(base_size = 20) +
+  theme(
+    strip.background = element_blank(),
+    strip.text = element_text(
+      size = 20,
+      face = "bold",
+      color = "black",
+      margin = margin(b = 4)
+    ),
+    axis.text.x = element_text(
+      size = 18,
+      face = "plain",
+      color = "black"
+    ),
+    axis.text.y = element_text(
+      size = 16,
+      color = "black"
+    ),
+    axis.title = element_blank(),
+    axis.line = element_line(
+      color = "grey40",
+      linewidth = 0.5
+    ),
+    axis.ticks = element_line(
+      color = "grey40",
+      linewidth = 0.5
+    ),
+    legend.position = "none",
+    panel.spacing.x = grid::unit(1.2, "lines"),
+    panel.spacing.y = grid::unit(1.4, "lines"),
+    plot.margin = margin(10, 10, 10, 10)
+  )
+
+print(p_panel_15)
+
+# ============================================================
+# H. TABLEAU DESCRIPTIF — 15 VARIABLES PAR SURFACE ET GROUPE
+#     Médiane [Q1 - Q3]
+# ============================================================
+
+trajectory_table_order <- c(
+  "Stable C2",
+  "Transient",
+  "Early Migrant",
+  "Late Migrant",
+  "Stable C1"
+)
+
+trajectory_table_labels <- c(
+  "Stable C2"     = "Consistent C2",
+  "Transient"     = "Transient",
+  "Early Migrant" = "Early Switchers",
+  "Late Migrant"  = "Late Switchers",
+  "Stable C1"     = "Consistent C1"
+)
+
+table_15_median_iqr_surface <- df_panel_15 %>%
+  mutate(
+    Trajectory = factor(Trajectory, levels = trajectory_table_order),
+    Group_label = recode(as.character(Trajectory), !!!trajectory_table_labels),
+    Group_label = factor(
+      Group_label,
+      levels = c(
+        "Consistent C2",
+        "Transient",
+        "Early Switchers",
+        "Late Switchers",
+        "Consistent C1"
+      )
+    )
+  ) %>%
+  group_by(Surface, Variable, Group_label) %>%
+  summarise(
+    n = n(),
+    Median = median(Value, na.rm = TRUE),
+    Q1 = quantile(Value, 0.25, na.rm = TRUE),
+    Q3 = quantile(Value, 0.75, na.rm = TRUE),
+    IQR = IQR(Value, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    Median_IQR = paste0(
+      round(Median, 2),
+      " [",
+      round(Q1, 2),
+      " - ",
+      round(Q3, 2),
+      "]"
+    )
+  ) %>%
+  select(Surface, Variable, Group_label, Median_IQR) %>%
+  pivot_wider(
+    names_from = Group_label,
+    values_from = Median_IQR
+  ) %>%
+  mutate(
+    Variable = recode(as.character(Variable), !!!variable_labels)
+  ) %>%
+  arrange(
+    Surface,
+    match(Variable, variable_labels)
+  )
+
+print(table_15_median_iqr_surface)
+
+# Export CSV avec séparateur virgule
+write.csv(
+  table_15_median_iqr_surface, "Table_15Variables_Median_IQR_by_Surface_and_Trajectory.csv")
+
+# --- SAUVEGARDE ---
+ggsave(
+  "Panel_15Variables_Surface_Trajectory_MATLABstyle.tiff",
+  plot = p_panel_15,
+  device = "tiff",
+  width = 18,
+  height = 18,
+  units = "in",
+  dpi = 600,
+  compression = "lzw"
+)
+
+ggsave(
+  "Panel_15Variables_Surface_Trajectory_MATLABstyle.pdf",
+  plot = p_panel_15,
+  width = 18,
+  height = 18,
+  units = "in"
+)
 
 message("\n=== TERMINÉ ===")
 message("Fichiers créés :")

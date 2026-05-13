@@ -1,6 +1,6 @@
 1. Labellisation du participant NEXUS avec marqueur manquant (membre sup., si c'est membre inf. c'est plus difficile d'avoir des données correctement interprétables).
 
-2. Ensuite importer sur ordi de travail les .c3d labellisés PUIS run le script pour chacun des essais à modifier (attention chemins d'accès)
+2. Ensuite importer sur ordi de travail les .c3d labellisés PUIS run le script pour chacun des essais à modifier (attention chemins d'accès). Prendre l'écart sur x, y, et z par rapport à un autre marqueur de référence sur l'essai statique (ex. j'ai C7 mais pas T10, je prends le déplacement que je dois faire en x, y, et z pour reconstruire le point: T10 - C7)
 
 3. Une fois les "NEW" sortis, remettre sur le disque dur les nouveaux essais AVEC les anciens (pour que NEXUS trouve dans le même dossier les nouveaux/anciens, car garde les mêmes modèles de sujets pour y appliquer la correction aux nouveaux)
 

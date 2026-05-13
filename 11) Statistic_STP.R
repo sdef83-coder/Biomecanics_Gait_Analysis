@@ -664,6 +664,271 @@ message("Génération des boxplots (Surface en X) en cours...")
 walk(vars_present, ~generate_gait_boxplot(.x, df))
 message("Terminé ! Les graphiques sont dans le dossier : ", output_dir)
 
+## ============================================================
+## 14bis) PANELS PAR DOMAINE — BOXPLOTS + MÉDIANES RELIÉES
+##        (médiane de chaque groupe reliée entre les 3 surfaces)
+## ============================================================
+
+library(ggplot2)
+library(patchwork)
+library(dplyr)
+library(tidyr)
+
+output_dir_panels <- "Boxplots_Gait_Results/Panels_Domaines"
+if (!dir.exists(output_dir_panels)) dir.create(output_dir_panels, recursive = TRUE)
+
+# ------------------------------------------------------------------
+# A) Définition des domaines et de leurs variables
+# ------------------------------------------------------------------
+domains_boxplot <- list(
+  
+  PACE = c(
+    "Mean_Gait_speed_m.s^{_1}",
+    "Mean_Norm_Gait_Speed_m.s^{_1}",
+    "Mean_Step_length_m",
+    "Mean_Stride_length_m",
+    "Mean_Norm_Step_length_ua",
+    "Mean_WalkRatio",
+    "Mean_Norm_WR_ua"
+  ),
+  
+  RHYTHM = c(
+    "Mean_Double_support_time_p",
+    "Mean_Single_support_time_p",
+    "Mean_StanceTime_s",
+    "Mean_SwingTime_s",
+    "Mean_StepTime_s",
+    "Mean_Stride_time_s",
+    "Mean_Cadence_step.min^{_1}",
+    "Mean_Norm_Cadence_ua",
+    "Mean_COM_SPARC_Magnitude_ua"
+  ),
+  
+  `DYNAMIC STABILITY` = c(
+    "Mean_StepWidth_cm",
+    "Mean_Norm_StepWidth_ua",
+    "Mean_MoS_AP_HS_mm",
+    "Mean_MoS_ML_HS_mm",
+    "Mean_MoS_AP_HS_pL0",
+    "Mean_MoS_ML_HS_pL0"
+  ),
+  
+  VARIABILITY = c(
+    "Mean_GVI_ua",
+    "CV_Norm_StepWidth_ua",
+    "CV_Gait_speed_m.s^{_1}"
+  ),
+  
+  ASYMMETRY = c(
+    "SI_Stride_length_m",
+    "SI_Double_support_time_p",
+    "SI_Norm_StepWidth_ua"
+  )
+)
+
+# ------------------------------------------------------------------
+# B) Palette AgeGroup + ordre des facteurs
+# ------------------------------------------------------------------
+age_palette <- c(
+  "Young Children" = "blue",
+  "Children"       = "chocolate3",
+  "Adolescents"    = "darkred",
+  "Adults"         = "purple"
+)
+
+age_order_en    <- c("Young Children", "Children", "Adolescents", "Adults")
+surface_levels_en <- c("Even", "Medium", "High")
+
+# ------------------------------------------------------------------
+# C) Préparation du dataframe de base
+# ------------------------------------------------------------------
+df_panels <- df %>%
+  filter(Surface %in% c("Plat", "Medium", "High")) %>%
+  mutate(
+    AgeGroup = factor(
+      AgeGroup,
+      levels = c("JeunesEnfants", "Enfants", "Adolescents", "Adultes"),
+      labels = age_order_en
+    ),
+    Surface = factor(
+      Surface,
+      levels = c("Plat", "Medium", "High"),
+      labels = surface_levels_en
+    )
+  )
+
+# ------------------------------------------------------------------
+# D) Fonction : générer UN sous-graphique (1 variable)
+#    Boxplots par AgeGroup × Surface
+#    + ligne reliant les MÉDIANES de chaque groupe entre les surfaces
+#    + points individuels en fond (jitter léger)
+# ------------------------------------------------------------------
+make_median_connected_boxplot <- function(var_name, data) {
+  
+  pretty_label <- make_pretty_label(var_name)
+  
+  df_plot <- data %>%
+    select(Participant, AgeGroup, Surface, all_of(var_name)) %>%
+    rename(Value = !!sym(var_name)) %>%
+    mutate(Value = suppressWarnings(as.numeric(Value))) %>%
+    filter(!is.na(Value))
+  
+  df_medians <- df_plot %>%
+    group_by(AgeGroup, Surface) %>%
+    summarise(Median = median(Value, na.rm = TRUE), .groups = "drop")
+  
+  dw <- 0.7
+  
+  ggplot(df_plot, aes(x = Surface, y = Value, color = AgeGroup, fill = AgeGroup)) +
+    
+    geom_point(
+      size     = 0.9,
+      alpha    = 0.25,
+      position = position_jitterdodge(jitter.width = 0.15, dodge.width = dw),
+      show.legend = FALSE
+    ) +
+    
+    geom_boxplot(
+      width         = 0.55,
+      alpha         = 0.55,
+      outlier.shape = NA,
+      linewidth     = 0.5,
+      position      = position_dodge(dw),
+      show.legend   = TRUE
+    ) +
+    
+    geom_line(
+      data      = df_medians,
+      aes(x = Surface, y = Median, group = AgeGroup, color = AgeGroup),
+      linewidth = 1.1,
+      linetype  = "dashed",
+      position  = position_dodge(dw),
+      show.legend = FALSE
+    ) +
+    
+    geom_point(
+      data     = df_medians,
+      aes(x = Surface, y = Median, color = AgeGroup),
+      size     = 3.5,
+      shape    = 18,
+      position = position_dodge(dw),
+      show.legend = FALSE
+    ) +
+    
+    scale_color_manual(values = age_palette) +
+    scale_fill_manual(values  = age_palette) +
+    
+    labs(
+      title = pretty_label,
+      x     = NULL,
+      y     = NULL,
+      color = "Age group",
+      fill  = "Age group"
+    ) +
+    
+    theme_minimal(base_size = 25) +          # ← base montée à 25
+    theme(
+      plot.title         = element_text(face = "bold", hjust = 0.5, size = 25),
+      legend.position    = "none",
+      panel.grid.minor   = element_blank(),
+      panel.grid.major.x = element_blank(),
+      axis.text.x        = element_text(size = 20, face = "bold"),
+      axis.text.y        = element_text(size = 20),
+      axis.ticks         = element_line(linewidth = 0.4),
+      plot.margin        = margin(10, 14, 10, 14)
+    )
+}
+
+# ------------------------------------------------------------------
+# E) Fonction : assembler et exporter le PANEL d'un domaine
+# ------------------------------------------------------------------
+generate_domain_panel <- function(domain_name, var_list, data) {
+  
+  vars_ok <- intersect(var_list, names(data))
+  
+  if (length(vars_ok) == 0) {
+    message("Domaine ", domain_name, " : aucune variable disponible, panel ignoré.")
+    return(invisible(NULL))
+  }
+  
+  if (length(vars_ok) < length(var_list)) {
+    message("Domaine ", domain_name, " — variables absentes :\n  ",
+            paste(setdiff(var_list, names(data)), collapse = "\n  "))
+  }
+  
+  message("Génération du panel : ", domain_name,
+          " (", length(vars_ok), " variables)")
+  
+  # Génération de tous les sous-graphiques
+  plots_list <- lapply(vars_ok, make_median_connected_boxplot, data = data)
+  
+  # Nombre de colonnes : 3 max
+  n_cols <- min(3, length(plots_list))
+  n_rows <- ceiling(length(vars_ok) / n_cols)
+  
+  # Légende collective
+  panel <- wrap_plots(plots_list, ncol = n_cols, guides = "collect") &
+    theme(legend.position = "bottom",
+          legend.text      = element_text(size = 16),
+          legend.title     = element_text(size = 17, face = "bold"),
+          legend.key.size  = unit(1.4, "lines"))
+  
+  panel <- panel +
+    plot_annotation(
+      theme    = theme(
+        plot.title    = element_blank(),
+        plot.subtitle = element_blank(),
+        plot.caption  = element_blank()
+      )
+    )
+  
+  # Dimensions agrandies pour absorber la police plus grande
+  fig_w <- n_cols * 8.0     # ← était 6.5
+  fig_h <- n_rows * 7.0 + 2.5  # ← était 5.5
+  
+  safe_name <- gsub("[^A-Za-z0-9_]", "_", domain_name)
+  
+  ggsave(
+    filename = file.path(output_dir_panels, paste0("Panel_", safe_name, ".png")),
+    plot     = panel,
+    width    = fig_w,
+    height   = fig_h,
+    dpi      = 300
+  )
+  
+  ggsave(
+    filename = file.path(output_dir_panels, paste0("Panel_", safe_name, ".pdf")),
+    plot     = panel,
+    width    = fig_w,
+    height   = fig_h
+  )
+  
+  ggsave(
+    filename = file.path(output_dir_panels, paste0("Panel_", safe_name, ".tif")),
+    plot     = panel,
+    width    = fig_w,
+    height   = fig_h,
+    dpi = 600,
+  )
+  
+  message("  → Exporté : Panel_", safe_name, ".png / .pdf")
+  return(panel)
+}
+
+# ------------------------------------------------------------------
+# F) Boucle principale
+# ------------------------------------------------------------------
+message("\n=== Génération des 5 panels par domaine ===\n")
+
+panels_generated <- mapply(
+  FUN         = generate_domain_panel,
+  domain_name = names(domains_boxplot),
+  var_list    = domains_boxplot,
+  MoreArgs    = list(data = df_panels),
+  SIMPLIFY    = FALSE
+)
+
+message("\n✓ Terminé. Fichiers dans : ", output_dir_panels)
 
 # ---------------------------------------------------------
 # 15) Génération des RADAR PLOTS par surface

@@ -200,7 +200,7 @@ fprintf('nPC_final choisi: %d PCs (variance cumulée = %.1f%%)\n', nPC_final, cu
 % Matrice des loadings (corrélations entre variables et PCs sélectionnées)
 loadings = corr(dataNorm, score(:, 1:nPC_final));
 
-fig_heatmap_loadings = figure('Color','w', 'Position', [100 100 1200 800]);
+fig_heatmap_loadings = figure('Color','w', 'Position', [100 100 850 520]); % avant c'était : 1200 800 (pour les deux derniers)
 h_load = heatmap(arrayfun(@(i) sprintf('PC%d (%.1f%%)', i, explained(i)), 1:nPC_final, 'UniformOutput', false), ...
                  allVars_disp, loadings, ...
                  'Title', sprintf('Variable Loadings on the selected %d principal components', nPC_final), ...
@@ -208,7 +208,7 @@ h_load = heatmap(arrayfun(@(i) sprintf('PC%d (%.1f%%)', i, explained(i)), 1:nPC_
                  'YLabel', 'Gait variables', ...
                  'Colormap', redblue(256), ...
                  'ColorLimits', [-1, 1]);
-h_load.FontSize = 9;
+h_load.FontSize = 12;
 h_load.CellLabelFormat = '%.2f';
 h_load.GridVisible = 'on';
 
@@ -373,7 +373,7 @@ fprintf('✅ Export traçabilité participants : %s\n', out_trace);
 markerMap = containers.Map({'Plat', 'Medium', 'High'}, {'o', 's', '^'});
 markerSizes = 60; % Taille des markers
 
-fig_agegrad_shapes = figure('Color','w', 'Position', [100 100 1000 800]); 
+fig_agegrad_shapes = figure('Color','w', 'Position', [100 100 780 650]); 
 hold on;
 
 % Tracer chaque condition avec sa forme spécifique
@@ -381,12 +381,18 @@ conds_unique = unique(meta.Condition);
 for iC = 1:numel(conds_unique)
     cond = conds_unique(iC);
     idx_cond = meta.Condition == cond;
+
+    % Nom à afficher dans la légende
+    label_cond = char(cond);
+    if strcmp(label_cond, 'Plat')
+        label_cond = 'Even';
+    end
     
     scatter(Xpcs_all_viz(idx_cond, 1), Xpcs_all_viz(idx_cond, 2), ...
             markerSizes, meta.AgeMonths(idx_cond)/12, ...
             'filled', markerMap(char(cond)), ...
             'MarkerFaceAlpha', 0.7, ...
-            'DisplayName', char(cond));
+            'DisplayName', label_cond);
 end
 
 colormap(parula); 
@@ -394,10 +400,15 @@ cb = colorbar;
 cb.Label.String = 'Age (years)';
 cb.FontSize = 11;
 
-xlabel(sprintf('PC1 (%.1f%%)', explained(1)), 'FontSize', 12); 
-ylabel(sprintf('PC2 (%.1f%%)', explained(2)), 'FontSize', 12);
-title(sprintf('PC1–PC2 projection with age gradient and surface-specific markers\nClustering based on %d principal components, k=%d', ...
-              nPC_final, k_global), 'FontSize', 13);
+xlabel(sprintf('PC1 (%.1f%%)', explained(1)), 'FontSize', 15); 
+ylabel(sprintf('PC2 (%.1f%%)', explained(2)), 'FontSize', 15);
+%title(sprintf('PC1–PC2 projection with age gradient and surface-specific markers\nClustering based on %d principal components, k=%d', ...
+              %nPC_final, k_global), 'FontSize', 13);
+ax = gca;
+ax.FontSize = 13;
+ax.LineWidth = 1.1;
+ax.Box = 'on';
+
 grid on;
 
 % Tracer les contours des clusters
@@ -421,7 +432,14 @@ for i = 1:k_global
 end
 
 % Légende pour les surfaces
-legend('Location', 'best', 'FontSize', 10);
+legend('Location', 'best', 'FontSize', 13);
+
+% === Export figure PC1-PC2 ===
+out_pc12 = fullfile(outdir, "04_PC1PC2_AgeGradient_Shapes_GLOBAL_k" + string(k_global) + "_" + ts + ".png");
+
+exportgraphics(fig_agegrad_shapes, out_pc12, 'Resolution', 300);
+
+fprintf('✅ Figure PC1-PC2 exportée : %s\n', out_pc12);
 
 % Annotations d'âge
 %AgeStats_global = annotate_age_on_clusters(gca, Xpcs_all_viz, idxCluster_global, Cc_global_pc12, meta.AgeMonths);
@@ -440,7 +458,7 @@ for kk = 1:numel(kRange)
     WCSS_vals(kk) = sum(d2);
 end
 
-fig_elbow_combo = figure('Color','w', 'Position',[100 100 800 850]);
+fig_elbow_combo = figure('Color','w', 'Position',[100 100 650 720]);
 tiledlayout(3,1,'TileSpacing','compact','Padding','compact');
 
 kRange_part = kRange(kRange >= 2);
@@ -450,28 +468,45 @@ ari_mean_part = ari_mean(kRange >= 2);
 % 1) WCSS
 nexttile;
 plot(kRange, WCSS_vals, '-o', 'LineWidth',1.6); grid on;
-ylabel('WCSS');
+ylabel('WCSS', 'FontSize', 13);
 title('k-selection (Global): Elbow + Silhouette + Stability (ARI)');
 xlim([min(kRange) max(kRange)]);
 hold on;
-xline(k_global,'--k',sprintf('k^*=%d',k_global),'LabelVerticalAlignment','bottom');
+xline(k_global,'--k',sprintf('k=%d',k_global), ...
+    'FontSize',12, ...
+    'LabelVerticalAlignment','bottom');
+
+ax = gca;
+ax.FontSize = 12;
+ax.LineWidth = 1;
+ax.Box = 'on';
 
 % 2) Silhouette
 nexttile;
 plot(kRange_part, sil_vals_part, '-o', 'LineWidth',1.6); grid on;
-ylabel('Mean silhouette');
+ylabel('Mean silhouette', 'FontSize', 13);
 xlim([2 max(kRange)]);
 hold on;
 xline(k_global,'--k','HandleVisibility','off');
 
+ax = gca;
+ax.FontSize = 12;
+ax.LineWidth = 1;
+ax.Box = 'on';
+
 % 3) ARI bootstrap
 nexttile;
 plot(kRange_part, ari_mean_part, '-o', 'LineWidth',1.6); grid on;
-ylabel('ARI (bootstrap mean)');
+ylabel('ARI', 'FontSize', 13);
 xlabel('Number of clusters (k)');
 xlim([2 max(kRange)]);
 hold on;
 xline(k_global,'--k','HandleVisibility','off');
+
+ax = gca;
+ax.FontSize = 12;
+ax.LineWidth = 1;
+ax.Box = 'on';
 
 exportgraphics(fig_elbow_combo, fullfile(outdir, "03a_Elbow_Sil_ARI_GLOBAL_"+ts+".png"), 'Resolution',300);
 
