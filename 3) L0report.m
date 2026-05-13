@@ -93,10 +93,13 @@ end
 % l0_map('CTL_75') = 0.568 ;
 % l0_map('CTL_76') = 1.01;
 % l0_map('CTL_77') = 0.45;
+% l0_map('CTL_78') = 0.514 ; 
+% l0_map('CTL_79') = 0.564 ;
+% l0_map('CTL_80') = 0.3515 ;
 
 % === NOUVEAUX PARTICIPANTS (à ajouter) ===
 
-l0_map('CTL_21') = 0.90 ; % Nouveau participant - décommentez si besoin de rajouter un participant
+l0_map('CTL_78') = 0.514 ; % Nouveau participant - décommentez si besoin de rajouter un participant
 
 % Sauvegarder dans le répertoire spécifié
 save(full_filename, 'l0_map');
